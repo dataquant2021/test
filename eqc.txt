@@ -1,0 +1,84 @@
+def marketposition_generator(enter_rules,exit_rules):
+    """
+    Funzione per calcolare il marketposition date due serie di enter_rules and exit_rules
+    """
+    service_dataframe = pd.DataFrame(index = enter_rules.index)
+    service_dataframe['enter_rules'] = enter_rules
+    service_dataframe['exit_rules'] = exit_rules
+    
+    status = 0
+    mp = []
+    for (i, j) in zip(enter_rules, exit_rules):
+        if status == 0:
+            if i == 1 and j != -1:
+                status = 1
+        else:
+            if j == -1:
+                status = 0
+        mp.append(status)
+        
+    service_dataframe['mp_new'] = mp
+    service_dataframe.mp_new = service_dataframe.mp_new.shift(1)
+    service_dataframe.iloc[0,2] = 0
+    #service_dataframe.to_csv("marketposition_generator.csv")
+    return service_dataframe.mp_new
+
+def window_profit_factor(operations, period):
+    """
+    Funzione che calcola il Profit Factor a finestra scorrevole
+    """
+    service = pd.DataFrame(index = operations.index)
+    service["positive"] = np.where(operations > 0, operations, 0)
+    service["negative"] = np.where(operations <= 0, operations, 0)
+    service["wgp"] = service.positive.rolling(period).sum()
+    service["wgl"] = service.negative.rolling(period).sum()
+    service["wpf"] = np.where(service["wgl"] != 0, service["wgp"] / service["wgl"], np.inf)
+    service["wpf"] = service.wpf.apply(lambda x: round(abs(x),2))
+    return service["wpf"]
+
+def epc_window_profit_factor(operations, firstwindowtradestype, window, threshold):
+    """
+    Equity Control System on Window Profit Factor
+    """
+    dataframe = pd.DataFrame(operations)
+    dataframe.columns = ["operations"]
+    #new_operations = pd.Series(index = operations.index)
+    dataframe["wpf"] = window_profit_factor(operations, window)    
+    dataframe["new_operations"] = np.where(dataframe.wpf.shift(1) >= threshold, dataframe.operations, np.nan)
+    dataframe["new_operations"] = np.where(((dataframe.wpf != dataframe.wpf) |\
+                                            (dataframe.wpf.shift(1) != dataframe.wpf.shift(1))) &\
+                                            (firstwindowtradestype == 1),
+                                            dataframe.operations, 
+                                            dataframe.new_operations)
+    return dataframe.new_operations
+
+def epc_window_profit_factor_advanced(operations, firstwindowtype, window, threshold):
+    """
+    Equity Control System on Window Profit Factor
+    """
+    dataframe = pd.DataFrame(operations)
+    dataframe.columns = ["operations"]
+    dataframe["original_equity"] = dataframe.operations.cumsum()
+    dataframe["new_high"] = dataframe.original_equity.expanding().max()
+    #new_operations = pd.Series(index = operations.index)
+    dataframe["wpf"] = window_profit_factor(operations, window)
+
+    # all condition on current bar: after the marketposition_generator function will delay the actions!
+    dataframe["inibition"] = np.where(dataframe.wpf.shift(1) < threshold, -1, 0)
+    dataframe["reactivation"] = np.where(dataframe.original_equity > dataframe.new_high.shift(1), 1, 0)   
+    dataframe["status"] = marketposition_generator(dataframe.reactivation,dataframe.inibition) 
+    
+    dataframe["controlled_operations"] = np.where(dataframe.status == 1, dataframe.operations, 0)
+    # firstwindowtype convention
+    if firstwindowtype == 1:
+        dataframe["controlled_operations"] = np.where((dataframe.wpf != dataframe.wpf) |\
+                                                      (dataframe.wpf.shift(1) != dataframe.wpf.shift(1)),
+                                                      dataframe.operations,
+                                                      dataframe.controlled_operations) 
+    if firstwindowtype == 0:
+        dataframe["controlled_operations"] = np.where(dataframe.wpf != dataframe.wpf,
+                                                      0,
+                                                      dataframe.controlled_operations) 
+    dataframe["controlled_equity"] = dataframe.controlled_operations.cumsum()
+    last_status = dataframe.status.iloc[-1]
+    return dataframe, last_status
