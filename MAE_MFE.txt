@@ -1,0 +1,94 @@
+MAE =[]
+MFE =[]
+for e in df_all.iloc[-nop:].index:
+    x=df_test.loc[str(e.date())].sum(axis=1)
+    x=x.cumsum()
+    MAE.append([str(e.date()),x.min()])
+    MFE.append([str(e.date()),x.max()])
+MAE = pd.DataFrame(MAE)
+MAE.columns = (["date","mae"])
+MAE.set_index(["date"],inplace=True)
+MFE = pd.DataFrame(MFE)
+MFE.columns = (["date","mfe"])
+MFE.set_index(["date"],inplace=True)
+
+df_M = pd.concat([MAE,MFE],axis=1)
+df_M.columns=(["MAE","MFE"])
+
+
+################################################################
+
+df_M.plot.bar(figsize=(20,10))
+
+
+#################################################################
+
+
+MFE.describe()
+
+
+
+#################################################################
+
+
+MAE.describe()
+
+#################################################################
+
+
+mfe = 8500
+mae = -7000
+
+new_pnl=[]
+
+for e in df_all.iloc[-nop:].index:
+    x=df_test.loc[str(e.date())].sum(axis=1)
+    x=x.cumsum()
+    pnl=0
+    yes_mae=0
+    yes_mfe=0
+    if len(x)>0:
+        if (x.min()<=mae) & (x.max()<mfe):
+            pnl = mae
+            yes_mae = 1    
+            print("Cond 1")
+            
+        if (x.max()>=mfe) & (x.min()>mae):
+            pnl = mfe
+            yes_mfe = 1
+            print("Cond 2")
+            
+        if (x.min()<=mae) &  (x.max()>=mfe):
+            if x.idxmin()<x.idxmax():
+                pnl = mae
+                yes_mae = 1 
+            if x.idxmax()<x.idxmin():
+                pnl = mfe
+                yes_mfe = 1      
+            print("Cond 3")  
+            
+        if (yes_mae==0) & (yes_mfe==0):
+            pnl = x.iloc[-1]
+            
+        new_pnl.append([str(e.date()),pnl])
+
+
+#################################################################
+
+
+new_df = pd.DataFrame(new_pnl)
+new_df.columns=(["date","MAE-MFE"])
+new_df.set_index(["date"],inplace=True)
+new_df.index=pd.to_datetime(new_df.index)
+new_df.tail()
+
+#################################################################
+
+
+
+new_df.cumsum().plot(figsize=(20,10),label="MAE-MFE")
+df_test.sum(axis=1).resample("D").sum().cumsum().plot(label="Originale")
+plt.legend()
+plt.show()
+
+
