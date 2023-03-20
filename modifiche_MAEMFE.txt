@@ -1,0 +1,52 @@
+def ottimizza_MAE_MFE(v1,v2,np_operations,np_index):
+    ott = pd.DataFrame()
+    for mfe in tqdm(v1):
+        for mae in v2:
+            new_pnl=[]
+            for k in range(len(np_operations)):
+                i = np_operations[k]                           
+                pnl = 0
+                yes_mae = 0
+                yes_mfe = 0
+                if len(i)>0:
+                    if (min(i)<=mae) & (max(i)<mfe):
+                        pnl = mae
+                        yes_mae = 1    
+
+                    if (max(i)>=mfe) & (min(i)>mae):
+                        pnl = mfe
+                        yes_mfe = 1
+
+                    if (min(i)<=mae) &  (max(i)>=mfe):
+                        if np.argmin(i)<np.argmax(i):
+                            pnl = mae
+                            yes_mae = 1 
+                        if np.argmax(i)<np.argmin(i):
+                            pnl = mfe
+                            yes_mfe = 1      
+
+                    if (yes_mae==0) & (yes_mfe==0):
+                        pnl = i[-1]
+                        
+                    new_pnl.append([np_index[k],pnl])
+                
+            new_df = pd.DataFrame(new_pnl)
+            new_df.columns=(["date",str(mfe)+"_"+str(mae)])
+            new_df.set_index(["date"],inplace=True)
+            new_df.index=pd.to_datetime(new_df.index)
+            ott = pd.concat([ott,new_df],axis=1).fillna(0)  
+            
+    return ott
+          
+v1=np.arange(2000,15000,500, dtype=int)
+v2=np.arange(2000,15000,500, dtype=int)*(-1)
+
+np_index = np.array(df_all.iloc[-nop:].index)
+np_operations = []
+for e in np_index:
+    x=df_test.loc[str(e)[:10]].sum(axis=1)
+    np_operations.append(x.cumsum().values)
+
+np_operations = np.array(np_operations , dtype=list)
+            
+ott = ottimizza_MAE_MFE(v1,v2,np_operations,np_index)
