@@ -1,0 +1,112 @@
+        from datetime import datetime
+        today = datetime.today().strftime('%Y-%m-%d')
+
+        direzione=data.direzione.iloc[n_id]
+        entry_rule=data.entry_rules.iloc[n_id].replace("dataset","history")
+        exit_rule=data.exit_rules.iloc[n_id].replace("dataset","history")
+        bigpointvalue=data.bigpointvalue.iloc[n_id]
+        tick=data.tick.iloc[n_id]
+        level=data.level.iloc[n_id].replace("dataset","history")
+        tipo_ordine=data.tipo_ordine.iloc[n_id]
+        exit_bars=data.exit_bars.iloc[n_id]
+        TP=data.TP.iloc[n_id]
+        SL=data.SL.iloc[n_id]
+        file_name=data.file_name.iloc[n_id]
+        costi=valori.Cost[valori.Physical==file_name].values[0]
+        uct_offset=data.uct_offset.iloc[n_id]
+        type_session=data.type_session.iloc[n_id]
+        resample_tf=data.resample_tf.iloc[n_id]
+        IS=data.start_date.iloc[n_id]
+        OOS=today #data.end_date.iloc[n_id]
+        custom_session_start="0"+str(data.custom_session_start.iloc[n_id])
+        custom_session_stop=str(data.custom_session_stop.iloc[n_id])
+        history=carica_storico_fast(file_name,uct_offset,type_session,resample_tf,IS,OOS,custom_session_start,custom_session_stop)
+        
+        DATAFRAME=history.copy() 
+        ADD_RULE_CONDITION=data.ADD_RULE_CONDITION.iloc[n_id]
+        Original_file_name=data.Original_file_name.iloc[n_id]
+
+        print(Original_file_name)
+
+        entry = np.array(np.array(eval(entry_rule)) & np.array(level_to_condition(level,history,tipo_ordine,direzione)) & check_add_rule(ADD_RULE_CONDITION,history))
+        
+        if SL == 0:
+            loss = np.array([False]*len(entry))
+        else:
+            loss = np.array(check_stoploss(SL,history,eval(level),bigpointvalue,direzione))
+        
+        if TP == 0:
+            gain = np.array([False]*len(entry))
+        else:
+            gain = np.array(check_takeprofit(TP,history,eval(level),bigpointvalue,direzione))
+            
+        exit_rule = np.array(eval(exit_rule))
+        price = np.array(history.open)
+        index_date = np.array(history.index)
+
+        start = time.time()
+        big_ls=[]
+        while True:
+            if exit_bars == 0:
+                exit_bars = 999999999
+            ingresso = np.where(entry==True)[0]  
+            if ingresso.size >1:
+                ingresso=ingresso[0]+1
+                uscita_a_barre = ingresso+exit_bars
+
+                uscita_a_loss = np.where(loss==True)[0] 
+                uscita_a_loss = uscita_a_loss[uscita_a_loss>=ingresso]
+                if uscita_a_loss.size == 0:
+                    uscita_a_loss = 999999999
+                else:
+                    uscita_a_loss = uscita_a_loss[0]+1
+
+                uscita_a_gain = np.where(gain==True)[0]
+                uscita_a_gain = uscita_a_gain[uscita_a_gain>=ingresso]
+                if uscita_a_gain.size == 0:
+                    uscita_a_gain = 999999999
+                else:
+                    uscita_a_gain = uscita_a_gain[0]+1
+
+                uscita_a_rule = np.where(exit_rule==True)[0]
+                uscita_a_rule = uscita_a_rule[uscita_a_rule>=ingresso]
+                if uscita_a_rule.size == 0:
+                    uscita_a_rule = 999999999
+                else:
+                    uscita_a_rule = uscita_a_rule[0]+1    
+
+                first_exit = np.sort([uscita_a_barre,uscita_a_loss,uscita_a_gain,uscita_a_rule])[0]
+
+                if price.size <= first_exit:  ####
+                    first_exit = price.size-1   ####
+
+                operation = ((price[first_exit]-price[ingresso])*bigpointvalue)
+                if direzione == "short":
+                    operation=operation*(-1)
+                    operation=operation-costi
+                else:
+                    operation=operation-costi
+                index_start = index_date[ingresso]
+                index_exit = index_date[first_exit]
+                big_ls.append([index_start,index_exit,price[ingresso],price[first_exit],np.round_(operation, decimals=2)])
+
+                entry = entry[first_exit:]
+                loss = loss[first_exit:]
+                gain = gain[first_exit:]
+                exit_rule = exit_rule[first_exit:]
+                price = price[first_exit:]
+                index_date = index_date[first_exit:]
+            else:
+                break
+
+
+        end = time.time()
+        print("Backtest strategia ..." , end - start)
+
+
+        op=pd.DataFrame(big_ls)
+        op.columns=(["entry_time","exit_time","prezzo_ingresso","prezzo_uscita","operations"])
+        op["direzione"]=direzione
+        op.set_index(["exit_time"],inplace=True)
+        op.index=pd.to_datetime(op.index)
+        return op
