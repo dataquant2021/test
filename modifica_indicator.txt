@@ -1,0 +1,119 @@
+from tqdm.notebook import tqdm
+import talib as ta
+
+def OPEN(dataset):
+    return dataset["open"]
+def HIGH(dataset):
+    return dataset["high"]
+def LOW(dataset):
+    return dataset["low"]
+def CLOSE(dataset):
+    return dataset["close"]
+
+
+def MACD(dataset,period,direzione):
+    macd, macd_signal, macd_hist = ta.MACD(dataset["close"], fastperiod=period, slowperiod=int(period*2.2), signalperiod=int(period*0.8))
+    macd_signal = ta.WMA(macd,period)
+    macd_signal = ta.SMA(macd,period)
+    if direzione == 1:
+        return  (macd-macd_signal)<0
+    if direzione == -1:
+        return  (macd-macd_signal)>0
+    
+def STOCH(dataset,period,direzione):
+    slowk , slowd = ta.STOCH(dataset["high"], dataset["low"], dataset["close"], period, int(period*0.3), 0, int(period*0.25), 0)
+    if direzione == 1:
+        return  slowk>slowd
+    if direzione == -1:
+        return  slowk<slowd
+    
+def RSI_ctr(dataset,period,level,direzione):
+    rsi = ta.RSI(dataset["close"],period)
+    if direzione == 1:
+        return  (rsi.shift(1)<(50+level))&(rsi>(50+level))
+    if direzione == -1:
+        return  (rsi.shift(1)>(50-level))&(rsi<(50-level))
+
+def RSI_tr(dataset,period,level,direzione):
+    rsi = ta.RSI(dataset["close"],period)
+    if direzione == 1:
+        return  (rsi.shift(1)<(50-level))&(rsi>(50-level))
+    if direzione == -1:
+        return  (rsi.shift(1)>(50+level))&(rsi<(50+level))
+    
+def hour_condition(dataset,hour,cnt):
+    return dataset.index.hour==hour
+  
+    
+def dayofweek_condition(dataset,dayofweek,cnt):
+    return dataset.index.dayofweek==dayofweek
+
+def day_condition(dataset,day,cnt):
+    return dataset.index.day==day
+  
+    
+def month_condition(dataset,month,cnt):
+    return dataset.index.month==month
+
+
+    
+def apply_indicator(history):
+    
+    dow_list=[]
+    for e in range(0,5):
+        for i in range(11): ### numero di ripetizioni
+            dow_list.append(eval('"(dayofweek_condition(dataset,"+str(e)+","+str(i)+"))"')) 
+            dow_list.append(eval('"(~dayofweek_condition(dataset,"+str(e)+","+str(i)+"))"'))
+        
+    hor_list=[]
+    for e in range(0,24,4): 
+        for i in range(11): ### numero di ripetizioni
+            hor_list.append(eval('"(hour_condition(dataset,"+str(e)+","+str(i)+"))"')) 
+            hor_list.append(eval('"(~hour_condition(dataset,"+str(e)+","+str(i)+"))"')) 
+            
+            
+    day_list=[]
+    for e in range(1,32):
+        for i in range(5): ### numero di ripetizioni
+            day_list.append(eval('"(day_condition(dataset,"+str(e)+","+str(i)+"))"')) 
+            day_list.append(eval('"(~day_condition(dataset,"+str(e)+","+str(i)+"))"'))
+        
+    month_list=[]
+    for e in range(1,13):
+        for i in range(6): ### numero di ripetizioni
+            month_list.append(eval('"(month_condition(dataset,"+str(e)+","+str(i)+"))"')) 
+            month_list.append(eval('"(~month_condition(dataset,"+str(e)+","+str(i)+"))"'))         
+            
+            
+        
+    macd_list=[]
+    for e in range(3,51):
+        macd_list.append(eval('"(MACD(dataset,"+str(e)+",1))"'))   
+        macd_list.append(eval('"(MACD(dataset,"+str(e)+",-1))"'))  
+            
+    stoch_list=[]
+    for e in range(6,51):
+        stoch_list.append(eval('"(STOCH(dataset,"+str(e)+",1))"'))   
+        stoch_list.append(eval('"(STOCH(dataset,"+str(e)+",-1))"'))  
+        
+    #rsi_list = []
+    #for e in range(5,30): ## periodi 
+        #for i in range(5,45,5): ##livelli
+            #rsi_list.append(eval('"(RSI_ctr(dataset,"+str(e)+","+str(i)+",1))"'))   
+            #rsi_list.append(eval('"(RSI_ctr(dataset,"+str(e)+","+str(i)+",-1))"'))
+            #rsi_list.append(eval('"(RSI_tr(dataset,"+str(e)+","+str(i)+",1))"'))   
+            #rsi_list.append(eval('"(RSI_tr(dataset,"+str(e)+","+str(i)+",-1))"'))
+
+    lista_rules=[]
+    lista_indicatori=[macd_list,dow_list,hor_list,day_list,month_list] #macd_list,stoch_list,rsi_list ,stoch_list
+    
+    tmp_df = dataset.close.to_frame()
+    
+    for i in tqdm(lista_indicatori):
+        print(len(i))
+        for e in i:
+            tmp_check=eval(e)
+            if (tmp_check.sum()>10)&(tmp_check.sum()<len(tmp_check)):
+                tmp_df[e]=tmp_check
+    tmp_df.drop(["close"],axis=1,inplace=True)
+    return  tmp_df , tmp_df.columns.to_list() 
