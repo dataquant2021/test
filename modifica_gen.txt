@@ -960,3 +960,15 @@ def pattern_translator():
 
     return pattern_dict
 
+
+
+def all_gains_full(dna):   
+    rule = setups(numba.typed.List(dna))
+    rule.setflags(write=1)
+    gains = numba_engine(rule,TIME_EXIT,gains_array,COSTS_FIXED)
+    tmp_times_array = times_array
+    ls=[]
+    for e in range(len(gains)):
+        if gains[e]!=0:
+            ls.append([tmp_times_array[e],gains[e]])
+    return ls
