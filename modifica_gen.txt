@@ -1,0 +1,962 @@
+####################### pattern
+
+dataset["dayofweek"] = dataset.index.dayofweek
+dataset["day"] = dataset.index.day
+dataset["week"] = dataset.index.week
+dataset["month"] = dataset.index.month
+dataset["year"] = dataset.index.year
+dataset["dayofyear"] = dataset.index.dayofyear
+dataset["quarter"] = dataset.index.quarter
+dataset["hour"] = dataset.index.hour
+dataset["minute"] = dataset.index.minute
+dataset["daily_open"] = daily_open(dataset,1)
+dataset["daily_high"] = daily_high(dataset,1)
+dataset["daily_low"] = daily_low(dataset,1)
+dataset["daily_close"] = daily_close(dataset,1)
+
+def eval_pattern(ptn):
+    for e in ptn:
+        exec(e,data)
+
+def apply_indicator(dataset):
+
+    data=dataset.copy()
+    
+    ptn=pattern_translator()
+    ptn_list = []
+    for e in tqdm(range(1,len(ptn))):
+        for r in ptn["p"+str(e)]:
+            exec(r)
+        ptn_list.append("p"+str(e))
+    data = dataset[ptn_list]  
+    for i in data.columns:
+        data[i+"_not"] = ~data[i]
+        dataset[i+"_not"] = ~dataset[i]
+        
+        
+    dow_list=[]
+    for e in range(0,5):
+        for i in range(11): ### numero di ripetizioni
+            a=(eval('"(dayofweek_condition(dataset,"+str(e)+","+str(i)+"))"')) 
+            b=(eval('"(~dayofweek_condition(dataset,"+str(e)+","+str(i)+"))"'))
+            dataset[a]=eval(a)
+            dataset[b]=eval(b)
+            data[a]=eval(a)
+            data[b]=eval(b)
+    hor_list=[]
+    for e in range(0,24,4): 
+        for i in range(11): ### numero di ripetizioni
+            a=(eval('"(hour_condition(dataset,"+str(e)+","+str(i)+"))"')) 
+            dataset[a]=eval(a)
+            data[a]=eval(a)
+    return data , data.columns
+
+
+
+def plot_equity_GSA(dna):
+    
+    gains = all_gains_full(dna)
+    if GSA == 1:
+        ls_os = np.array_split(gains,GSA_SPLIT)[1::2]
+        if len(ls_os)>1:
+            l_lst=[]
+            for nls in ls_os:
+                l_lst.append([nls[0][0],nls[-1][0]])
+            for ln in range(len(l_lst)):
+                if ln != len(l_lst)-1:
+                    a2,a2b=l_lst[ln][0], l_lst[ln][-1]
+                    plt.axvspan(a2,a2b,alpha=0.2, color='red',label ="")
+    if len(gains)>0:
+        times, gains = zip(*gains)
+        profits = np.array(gains).cumsum()
+        equity = pd.Series(profits, times)
+        equity.plot(figsize=(14, 8), grid = True, label="main strategies")
+        plt.axvline(x=OOS_date ,color="red")
+
+
+def all_gains(dna):
+    
+    rule = setups(numba.typed.List(dna))
+    rule.setflags(write=1)
+    rule=rule[:Out_Of_Sample_pct]
+    gains = numba_engine(rule,TIME_EXIT,gains_array[:Out_Of_Sample_pct],COSTS_FIXED)
+    tmp_times_array = times_array[:Out_Of_Sample_pct]
+    ls=[]
+    for e in range(len(gains)):
+        if gains[e]!=0:
+            ls.append([tmp_times_array[e],gains[e]])
+    if INSTABILITY_FACTOR>0:
+        ls = instability(ls,INSTABILITY_FACTOR)
+    if GSA == 1:
+        ls_is , ls_os =fast_GSA(ls,GSA_SPLIT)
+        if len(ls_is)>1:
+            ls=merge_lst(ls_is)            
+    return ls
+
+def OOS(dataset,pct):
+    if pct == 0:
+        return len(dataset)
+    else:
+        return int(len(dataset) - (len(dataset) // (100/pct)))
+    
+def instability(array,pct):
+    dimension = int(len(array) - (len(array) // (100/pct)))
+    rng = np.random.default_rng()
+    rand_array=rng.choice(array, dimension)
+    return np.array(sorted(sorted(rand_array,key=lambda e:e[1]),key=lambda e:e[0]))
+
+def fast_GSA(dataframe,n_split):
+    newdf_split = np.array_split(dataframe, n_split)
+    return np.concatenate(newdf_split[0::2]) , np.concatenate(newdf_split[1::2])
+
+def merge_lst(a):
+    import collections
+    super_dict = collections.defaultdict(list)
+    for e in a:
+        super_dict[e[0]].append(e[1])
+    dictlist=list()
+    for key, value in super_dict.items():
+        dictlist.append([key]+value)
+    return dictlist
+
+
+def plot_equity_full(dna,secondary_equity):
+    """
+    Funzione che grafichi l'equity line risultatnte 
+    dato un DNA.
+    """
+    gains = all_gains_full(dna)
+    if len(gains)>0:
+        gains=stack_sort(gains,secondary_equity)
+        times, gains = zip(*gains)
+        profits = np.array(gains).cumsum()
+        equity = pd.Series(profits, times)
+        equity.plot(figsize=(14, 8), grid = True, color="green")
+        dataset.close.plot(secondary_y=True,color="grey",linewidth=0.3)
+        plt.axvline(x=OOS_date ,color="red")
+
+
+
+INSTRUMENT = 2  # 1: equity, 2: future, 3: crypto/forex
+CAPITAL = 1  # money per trade (case INSTRUMENTS = 1,3) or number of contracts (case INSTRUMENTS = 2)
+BIGPOINTVALUE = get_poin_values(path,simbolo)
+TICK = 0.0001
+COSTS_FIXED = 5
+Out_Of_Sample_pct = OOS(dataset,5)
+secondary_equity = check_secondary_equity(secondary_equity)
+
+TIME_EXIT = 4
+DIRECTION = "long"
+
+POPULATION_SIZE = 300
+NUM_GENERATIONS = 20
+
+DNA_SIZE = 4
+BEST_DNA_RATIO = 0.2
+CROSS_DNA_RATIO = 0.2
+MUTATION_PROB = 0.5
+
+# Profit
+# AvgTrade
+# ProfitFactor
+# GrossProfit
+# Profit/MaxDrawDown
+# AvgTrade/MaxDrawDown
+# KestnerRatio
+# StandardDeviation
+# SQN
+FITNESS_FUNCTION = "SQN"
+MIN_OPERATIONS = 100
+
+INSTABILITY_FACTOR = 10
+GSA = 0
+GSA_SPLIT = 10
+
+# Conversioni per Numba
+#rules_array = rules.iloc[:Out_Of_Sample_pct].copy().values.T
+#open_array = dataset.open.values[:Out_Of_Sample_pct].copy()
+#close_array = dataset.close.values[:Out_Of_Sample_pct].copy()
+#times_array = dataset.index.values[:Out_Of_Sample_pct].copy()
+#gains_array = target(DIRECTION,TIME_EXIT,dataset.iloc[:Out_Of_Sample_pct]) 
+
+
+rules_array = rules.copy().values.T
+open_array = dataset.open.values.copy()
+close_array = dataset.close.values.copy()
+times_array = dataset.index.values.copy()
+gains_array = target(DIRECTION,TIME_EXIT,dataset) 
+
+population = first_generation()
+
+OOS_date = dataset.iloc[:Out_Of_Sample_pct].index[-1]
+
+%time best_dnas = evolution()
+
+
+
+
+
+
+def pattern_translator():    
+    
+    
+
+    pattern_dict = {}
+    
+    pattern_dict['p1'] = ['myBodyD1 = round(abs(dataset.daily_open - dataset.daily_close),2)',
+                          'myRangeD1 = dataset.daily_high - dataset.daily_low',
+                          'dataset["p1"] = myBodyD1<(0.1*myRangeD1)']
+                          
+    pattern_dict['p2'] = ['myBodyD1 = round(abs(dataset.daily_open - dataset.daily_close),2)',
+                          'myRangeD1 = dataset.daily_high - dataset.daily_low',
+                          'dataset["p2"] = myBodyD1<(0.25*myRangeD1)']  
+    
+    pattern_dict['p3'] = ['myBodyD1 = round(abs(dataset.daily_open - dataset.daily_close),2)',
+                          'myRangeD1 = dataset.daily_high - dataset.daily_low',
+                          'dataset["p3"]= myBodyD1<(0.5*myRangeD1)']
+    
+    pattern_dict['p4'] = ['myBodyD1 = round(abs(dataset.daily_open - dataset.daily_close),2)',
+                          'myRangeD1 = dataset.daily_high - dataset.daily_low',
+                          'dataset["p4"] = myBodyD1<(0.75*myRangeD1)'] 
+    
+    pattern_dict['p5'] = ['myBodyD1 = round(abs(dataset.daily_open - dataset.daily_close),2)',
+                          'myRangeD1 = dataset.daily_high - dataset.daily_low',
+                          'dataset["p5"] = myBodyD1>(0.25*myRangeD1)'] 
+
+    pattern_dict['p6'] = ['myBodyD1 = round(abs(dataset.daily_open - dataset.daily_close),2)',
+                          'myRangeD1 = dataset.daily_high - dataset.daily_low',
+                          'dataset["p6"] = myBodyD1>(0.5*myRangeD1)'] 
+    
+    pattern_dict['p7'] = ['myBodyD1 = round(abs(dataset.daily_open - dataset.daily_close),2)',
+                          'myRangeD1 = dataset.daily_high - dataset.daily_low',
+                          'dataset["p7"]= myBodyD1>(0.75*myRangeD1)'] 
+    
+    pattern_dict['p8'] = ['myBodyD1 = round(abs(dataset.daily_open - dataset.daily_close),2)',
+                          'myRangeD1 = dataset.daily_high - dataset.daily_low',
+                          'dataset["p8"] = myBodyD1>(1*myRangeD1)'] 
+    
+    pattern_dict['p9'] = ['myBodyD1 = round(abs(dataset.daily_open - dataset.daily_close),2)',
+                          'daily_high5 = daily_high(dataset,5)',
+                          'daily_low5 = daily_low(dataset,5)',
+                          'myRangeD5 = daily_high5 - daily_low5',
+                          'dataset["p9"] = myBodyD1<(0.5*myRangeD5)']
+    
+    pattern_dict['p10'] = ['myBodyD1 = round(abs(dataset.daily_open - dataset.daily_close),2)',
+                           'daily_high2 = daily_high(dataset,2)',
+                           'daily_high3 = daily_high(dataset,3)',
+                           'daily_high4 = daily_high(dataset,4)',
+                           'daily_high5 = daily_high(dataset,5)',
+                           'daily_high6 = daily_high(dataset,6)',
+                           'daily_high7 = daily_high(dataset,7)',
+                           'daily_high8 = daily_high(dataset,8)',
+                           'daily_high9 = daily_high(dataset,9)',
+                           'daily_high0 = daily_high(dataset,10)',
+                           'daily_low2 = daily_low(dataset,2)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'daily_low4 = daily_low(dataset,4)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_low6 = daily_low(dataset,5)',
+                           'daily_low7 = daily_low(dataset,7)',
+                           'daily_low8 = daily_low(dataset,8)',
+                           'daily_low9 = daily_low(dataset,9)',
+                           'daily_low0 = daily_low(dataset,10)',  
+                           'myRangeMaxD10 = (highest_serie(dataset.daily_high,daily_high2,daily_high3,daily_high4,daily_high5,daily_high6,daily_high7,daily_high8,daily_high9,daily_high0) -\
+                           (lowest_serie(dataset.daily_low,daily_low2,daily_low3,daily_low4,daily_low5,daily_low6,daily_low7,daily_low8,daily_low9,daily_low0)))',
+                           'dataset["p10"] = myBodyD1<(0.5*myRangeMaxD10)']
+    
+    pattern_dict['p11'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p11"] = myBodyD5 < (0.1*(daily_high5 - dataset.daily_low))']
+    
+    pattern_dict['p12'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p12"] = myBodyD5 < (0.25*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p13'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p13"] = myBodyD5 < (0.50*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p14'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p14"] = myBodyD5 < (0.75*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p15'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p15"] = myBodyD5 < (1*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p16'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p16"] = myBodyD5 < (1.5*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p17'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p17"] = myBodyD5 < (2*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p18'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p18"] = myBodyD5 > (0.25*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p19'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p19"] = myBodyD5 > (0.50*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p20'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p20"] = myBodyD5 > (0.75*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p21'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p21"] = myBodyD5 > (1*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p22'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p22"] = myBodyD5 > (1.5*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p23'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p23"] = myBodyD5 > (2*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p24'] = ['daily_high5 = daily_high(dataset,5)',
+                          'daily_open5 = daily_open(dataset,5)',
+                          'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                          'dataset["p24"] = myBodyD5 > (2.5*(daily_high5-dataset.daily_low))']
+    
+    pattern_dict['p25'] = ['daily_high5 = daily_high(dataset,5)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_open5 = daily_open(dataset,5)',
+                           'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                           'myRangeD5 = daily_high5 - daily_low5',                           
+                           'dataset["p25"] = myBodyD5 < (0.1*myRangeD5)']
+    
+    pattern_dict['p26'] = ['daily_high5 = daily_high(dataset,5)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_open5 = daily_open(dataset,5)',
+                           'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                           'myRangeD5 = daily_high5 - daily_low5',                           
+                           'dataset["p26"] = myBodyD5 < (0.25*myRangeD5)']
+    
+    pattern_dict['p27'] = ['daily_high5 = daily_high(dataset,5)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_open5 = daily_open(dataset,5)',
+                           'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                           'myRangeD5 = daily_high5 - daily_low5',                           
+                           'dataset["p27"] = myBodyD5 < (0.5*myRangeD5)']
+    
+    pattern_dict['p28'] = ['daily_high5 = daily_high(dataset,5)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_open5 = daily_open(dataset,5)',
+                           'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                           'myRangeD5 = daily_high5 - daily_low5',                           
+                           'dataset["p28"] = myBodyD5 < (0.75*myRangeD5)']
+    
+    pattern_dict['p29'] = ['daily_high5 = daily_high(dataset,5)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_open5 = daily_open(dataset,5)',
+                           'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                           'myRangeD5 = daily_high5 - daily_low5',                           
+                           'dataset["p29"] = myBodyD5 > (0.1*myRangeD5)']
+    
+    pattern_dict['p30'] = ['daily_high5 = daily_high(dataset,5)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_open5 = daily_open(dataset,5)',
+                           'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                           'myRangeD5 = daily_high5 - daily_low5',                           
+                           'dataset["p30"] = myBodyD5 > (0.25*myRangeD5)']
+    
+    pattern_dict['p31'] = ['daily_high5 = daily_high(dataset,5)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_open5 = daily_open(dataset,5)',
+                           'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                           'myRangeD5 = daily_high5 - daily_low5',                           
+                           'dataset["p31"] = myBodyD5 > (0.5*myRangeD5)']
+    
+    pattern_dict['p32'] = ['daily_high5 = daily_high(dataset,5)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_open5 = daily_open(dataset,5)',
+                           'myBodyD5 = round(abs(daily_open5 - dataset.daily_close),2)',
+                           'myRangeD5 = daily_high5 - daily_low5',                           
+                           'dataset["p32"] = myBodyD5 > (0.75*myRangeD5)']
+    
+    pattern_dict['p33'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_close3 = daily_close(dataset,3)',
+                           'daily_close4 = daily_close(dataset,4)',
+                           'dataset["p33"] = (dataset.daily_close>daily_close2) & (daily_close2>daily_close3) & (daily_close3>daily_close4)']
+    
+    pattern_dict['p34'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_close3 = daily_close(dataset,3)',
+                           'daily_close4 = daily_close(dataset,4)',
+                           'dataset["p34"] = (dataset.daily_close<daily_close2) & (daily_close2<daily_close3) & (daily_close3<daily_close4)']
+    
+    pattern_dict['p35'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_close3 = daily_close(dataset,3)',
+                           'daily_close4 = daily_close(dataset,4)',
+                           'daily_close5 = daily_close(dataset,5)',
+                           'dataset["p35"] = (dataset.daily_close>daily_close2) & (daily_close2>daily_close3) & (daily_close3>daily_close4) & (daily_close4>daily_close5)']
+    
+    pattern_dict['p36'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_close3 = daily_close(dataset,3)',
+                           'daily_close4 = daily_close(dataset,4)',
+                           'daily_close5 = daily_close(dataset,5)',
+                           'dataset["p35"] = dataset["p36"] = (dataset.daily_close<daily_close2) & (daily_close2<daily_close3) & (daily_close3<daily_close4) & (daily_close4<daily_close5)']
+    
+    pattern_dict['p37'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',  
+                           'dataset["p37"] = (dataset.daily_high>daily_high2) & (dataset.daily_low>daily_low2)']
+    
+    pattern_dict['p38'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',  
+                           'dataset["p38"] = (dataset.daily_high<daily_high2) & (dataset.daily_low<daily_low2)']
+    
+    pattern_dict['p39'] = ['daily_close2 = daily_close(dataset,2)',                             
+                           'dataset["p39"] = (dataset.daily_close>daily_close2)']
+    
+    pattern_dict['p40'] = ['daily_close2 = daily_close(dataset,2)',                             
+                           'dataset["p40"] = (dataset.daily_close<daily_close2)']
+    
+    pattern_dict['p41'] = ['dataset["p41"] = (dataset.daily_close<dataset.daily_open)']
+    
+    pattern_dict['p42'] = ['dataset["p42"] = (dataset.daily_close>dataset.daily_open)']
+    
+    pattern_dict['p43'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p43"] = (dataset.daily_close<(daily_close2-(daily_close2*0.5*0.01)))']
+    
+    pattern_dict['p44'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p44"] = (dataset.daily_close<(daily_close2-(daily_close2*1*0.01)))']
+    
+    pattern_dict['p45'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p45"] = (dataset.daily_close<(daily_close2-(daily_close2* 1.5*0.01)))']
+    
+    pattern_dict['p46'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p46"] = (dataset.daily_close<(daily_close2-(daily_close2*2*0.01)))']
+    
+    pattern_dict['p47'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p47"] = (dataset.daily_close<(daily_close2-(daily_close2*2.5*0.01)))']
+    
+    pattern_dict['p48'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p48"] = (dataset.daily_close<(daily_close2-(daily_close2*3*0.01)))']
+    
+    pattern_dict['p49'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p49"] = (dataset.daily_close>(daily_close2+(daily_close2*0.5*0.01)))']
+    
+    pattern_dict['p50'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p50"] = (dataset.daily_close>(daily_close2+(daily_close2*1*0.01)))']
+    
+    pattern_dict['p51'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p51"] = (dataset.daily_close>(daily_close2+(daily_close2*1.5*0.01)))']
+    
+    pattern_dict['p52'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p52"] = (dataset.daily_close>(daily_close2+(daily_close2*2*0.01)))']
+    
+    pattern_dict['p53'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p53"] = (dataset.daily_close>(daily_close2+(daily_close2*2.5*0.01)))']
+    
+    pattern_dict['p54'] = ['daily_close2 = daily_close(dataset,2)', 
+                           'dataset["p54"] = (dataset.daily_close>(daily_close2+(daily_close2*3*0.01)))']
+    
+    pattern_dict['p55'] = ['daily_high5 = daily_high(dataset,5)', 
+                           'dataset["p55"] = dataset.daily_high>daily_high5']
+    
+    pattern_dict['p56'] = ['daily_high5 = daily_high(dataset,5)', 
+                           'dataset["p56"] = dataset.daily_high<daily_high5']
+    
+    pattern_dict['p57'] = ['daily_low5 = daily_low(dataset,5)', 
+                           'dataset["p57"] = dataset.daily_low>daily_low5']
+    
+    pattern_dict['p58'] = ['daily_low5 = daily_low(dataset,5)', 
+                           'dataset["p58"] = dataset.daily_low<daily_low5']
+    
+    pattern_dict['p59'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_high3 = daily_high(dataset,3)',
+                           'daily_high4 = daily_high(dataset,4)',                           
+                           'dataset["p59"] = (dataset.daily_high>daily_high2)&(dataset.daily_high>daily_high3)&(dataset.daily_high>daily_high4)']
+    
+    pattern_dict['p59'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_high3 = daily_high(dataset,3)',
+                           'daily_high4 = daily_high(dataset,4)',                           
+                           'dataset["p59"] = (dataset.daily_high>daily_high2)&(dataset.daily_high>daily_high3)&(dataset.daily_high>daily_high4)']
+    
+    pattern_dict['p60'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_high3 = daily_high(dataset,3)',
+                           'daily_high4 = daily_high(dataset,4)',                           
+                           'dataset["p60"] = (dataset.daily_high<daily_high2)&(dataset.daily_high<daily_high3)&(dataset.daily_high<daily_high4)']
+    
+    pattern_dict['p61'] = ['daily_low2 = daily_low(dataset,2)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'daily_low4 = daily_low(dataset,4)',                           
+                           'dataset["p61"] = (dataset.daily_low<daily_low2)&(dataset.daily_low<daily_low3)&(dataset.daily_low<daily_low4)']
+    
+    pattern_dict['p62'] = ['daily_low2 = daily_low(dataset,2)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'daily_low4 = daily_low(dataset,4)',                           
+                           'dataset["p62"] = (dataset.daily_low>daily_low2)&(dataset.daily_low>daily_low3)&(dataset.daily_low>daily_low4)']
+    
+    pattern_dict['p63'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_close3 = daily_close(dataset,3)',                                                
+                           'dataset["p63"] = (dataset.daily_close>daily_close2)&(dataset.daily_close>daily_close3)&(dataset.daily_close>dataset.daily_open)']
+    
+    pattern_dict['p64'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_close3 = daily_close(dataset,3)',                                                
+                           'dataset["p64"] = (dataset.daily_close<daily_close2)&(dataset.daily_close<daily_close3)&(dataset.daily_close<dataset.daily_open)']
+    
+    pattern_dict['p65'] = ['myRangeD1 = dataset.daily_high - dataset.daily_low',                                              
+                           'dataset["p65"] = (dataset.daily_high-dataset.daily_close)<0.20*myRangeD1']
+    
+    pattern_dict['p66'] = ['myRangeD1 = dataset.daily_high - dataset.daily_low',                                              
+                           'dataset["p66"] = (dataset.daily_high-dataset.daily_low)<0.20*myRangeD1']
+    
+    pattern_dict['p67'] = ['myRangeD1 = dataset.daily_high - dataset.daily_low',
+                           'daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',                           
+                           'dataset["p67"] = (myRangeD1<(((daily_high2-daily_low2)+(daily_high2-daily_low2))/3))']
+    
+    pattern_dict['p68'] = ['myRangeD1 = dataset.daily_high - dataset.daily_low',
+                           'daily_high2 = daily_high(dataset,2)',
+                           'daily_high3 = daily_high(dataset,3)',
+                           'daily_low2 = daily_low(dataset,2)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'myRangeD2 = daily_high2 - daily_low2',
+                           'myRangeD3 = daily_high3 - daily_low3',
+                           'dataset["p68"] = (myRangeD1<myRangeD2)&(myRangeD2<myRangeD3)']
+    
+    pattern_dict['p69'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',                           
+                           'dataset["p69"] = (daily_high2>dataset.daily_high)&(daily_low2 < dataset.daily_low)']
+    
+    pattern_dict['p70'] = ['daily_high2 = daily_high(dataset,2)',
+                           'dataset["p70"] = (dataset.daily_high<daily_high2)']
+    
+    pattern_dict['p71'] = ['daily_low2 = daily_low(dataset,2)',
+                           'dataset["p71"] = (dataset.daily_low>daily_low2)']
+    
+    pattern_dict['p72'] = ['daily_low2 = daily_low(dataset,2)',
+                           'dataset["p72"] = (dataset.daily_low<daily_low2)']
+    
+    pattern_dict['p73'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',                            
+                           'dataset["p73"] = (daily_high2>dataset.daily_high)|(daily_low2<dataset.daily_low)']
+    
+    pattern_dict['p74'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',                            
+                           'dataset["p74"] = (daily_high2<dataset.daily_high)&(daily_low2>dataset.daily_low)']
+    
+    pattern_dict['p75'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_open2 = daily_open(dataset,2)',                            
+                           'dataset["p75"] = (dataset.daily_close>dataset.daily_open) & (daily_close2>daily_open2)']
+    
+    pattern_dict['p76'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_open2 = daily_open(dataset,2)',                            
+                           'dataset["p76"] = (dataset.daily_close<dataset.daily_open) & (daily_close2>daily_open2)']
+    
+    pattern_dict['p77'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_open2 = daily_open(dataset,2)',                            
+                           'dataset["p77"] = (dataset.daily_close<dataset.daily_open) & (daily_close2<daily_open2)']
+    
+    pattern_dict['p78'] = ['daily_open2 = daily_open(dataset,2)',
+                           'daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',                           
+                           'myMaxHighD2 = highest_serie(dataset.daily_high,daily_high2)',
+                           'myMinLowD2 = lowest_serie(dataset.daily_low,daily_low2)',  
+                           'dataset["p78"] = abs(daily_open2-dataset.daily_close) < (0.5*(myMaxHighD2 - myMinLowD2))']
+    
+    pattern_dict['p79'] = ['daily_high2 = daily_high(dataset,2)',                          
+                           'dataset["p79"] = (dataset.daily_high> daily_high2)']
+    
+    pattern_dict['p80'] = ['daily_high2 = daily_high(dataset,2)',   
+                           'daily_high3 = daily_high(dataset,3)',
+                           'dataset["p80"] = (dataset.daily_high> daily_high2) & (dataset.daily_high>daily_high3)']
+    
+    pattern_dict['p81'] = ['daily_high2 = daily_high(dataset,2)',   
+                           'daily_high3 = daily_high(dataset,3)',
+                           'dataset["p81"] = (dataset.daily_high< daily_high2) & (dataset.daily_high< daily_high3)']
+    
+    pattern_dict['p82'] = ['daily_low2 = daily_low(dataset,2)',                          
+                           'dataset["p82"] = (dataset.daily_low<daily_low2)']
+    
+    pattern_dict['p82'] = ['daily_low2 = daily_low(dataset,2)', 
+                           'daily_low3 = daily_low(dataset,2)',                            
+                           'dataset["p82"] = (dataset.daily_low>daily_low2) & (dataset.daily_low>daily_low3)']
+    
+    pattern_dict['p83'] = ['daily_low2 = daily_low(dataset,2)', 
+                           'daily_low3 = daily_low(dataset,2)',                            
+                           'dataset["p83"] = (dataset.daily_low<daily_low2) & (dataset.daily_low<daily_low3)']
+    
+    pattern_dict['p84'] = ['daily_low2 = daily_low(dataset,2)', 
+                           'daily_low3 = daily_low(dataset,2)', 
+                           'daily_high2 = daily_high(dataset,2)', 
+                           'daily_high3 = daily_high(dataset,3)', 
+                           'dataset["p84"] = (dataset.daily_high>daily_high2) & (dataset.daily_low>daily_low2) & (daily_high2<daily_high3) & (daily_low2<daily_low3)']
+    
+    pattern_dict['p85'] = ['daily_low2 = daily_low(dataset,2)', 
+                           'daily_low3 = daily_low(dataset,2)', 
+                           'daily_high2 = daily_high(dataset,2)', 
+                           'daily_high3 = daily_high(dataset,3)', 
+                           'dataset["p85"] = (dataset.daily_high<daily_high2) & (dataset.daily_low<daily_low2) & (daily_high2>daily_high3) & (daily_low2>daily_low3)']
+
+
+    pattern_dict['p86'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_close3 = daily_close(dataset,3)',
+                           'dataset["p86"] = (dataset.daily_close>daily_close2) & (daily_close2>daily_close3)']
+    
+    pattern_dict['p87'] = ['daily_close2 = daily_close(dataset,2)',
+                           'daily_close3 = daily_close(dataset,3)',
+                           'dataset["p87"] = (dataset.daily_close<daily_close2) & (daily_close2<daily_close3)']
+    
+    pattern_dict['p88'] = ['daily_open2 = daily_open(dataset,2)',
+                           'daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',
+                           'daily_close2 = daily_close(dataset,2)',                           
+                           'myAvgPriceD1 = round(((dataset.daily_open + dataset.daily_high +dataset.daily_low + dataset.daily_close)/4),2)',
+                           'myAvgPriceD2 = round(((daily_open2 + daily_high2 + daily_low2 + daily_close2)/4),2)',
+                           'dataset["p88"] = (myAvgPriceD1 > myAvgPriceD2)']
+    
+    pattern_dict['p89'] = ['daily_open2 = daily_open(dataset,2)',
+                           'daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',
+                           'daily_close2 = daily_close(dataset,3)', 
+                           'daily_open3 = daily_open(dataset,3)',
+                           'daily_high3 = daily_high(dataset,3)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'daily_close3 = daily_close(dataset,3)', 
+                           'myAvgPriceD1 = round(((dataset.daily_open + dataset.daily_high + dataset.daily_low + dataset.daily_close)/4),2)',
+                           'myAvgPriceD2 = round(((daily_open2 + daily_high2 + daily_low2 + daily_close2)/4),2)',
+                           'myAvgPriceD3 = round(((daily_open3 + daily_high3 + daily_low3 + daily_close3)/4),2)',
+                           'dataset["p89"] = (myAvgPriceD1 > myAvgPriceD2) & (myAvgPriceD1 > myAvgPriceD3)']
+    
+    pattern_dict['p90'] = ['daily_open2 = daily_open(dataset,2)',
+                           'daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',
+                           'daily_close2 = daily_close(dataset,2)',                           
+                           'myAvgPriceD1 = round(((dataset.daily_open + dataset.daily_high + dataset.daily_low + dataset.daily_close)/4),2)',
+                           'myAvgPriceD2 = round(((daily_open2 + daily_high2 + daily_low2 + daily_close2)/4),2)',
+                           'dataset["p90"] = (myAvgPriceD1 < myAvgPriceD2)']
+    
+    pattern_dict['p91'] = ['daily_open2 = daily_open(dataset,2)',
+                           'daily_high2 = daily_high(dataset,2)',
+                           'daily_low2 = daily_low(dataset,2)',
+                           'daily_close2 = daily_close(dataset,3)', 
+                           'daily_open3 = daily_open(dataset,3)',
+                           'daily_high3 = daily_high(dataset,3)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'daily_close3 = daily_close(dataset,3)', 
+                           'myAvgPriceD1 = round(((dataset.daily_open + dataset.daily_high + dataset.daily_low + dataset.daily_close)/4),2)',
+                           'myAvgPriceD2 = round(((daily_open2 + daily_high2 + daily_low2 + daily_close2)/4),2)',
+                           'myAvgPriceD3 = round(((daily_open3 + daily_high3 + daily_low3 + daily_close3)/4),2)',
+                           'dataset["p91"] = (myAvgPriceD1 < myAvgPriceD2) & (myAvgPriceD1 < myAvgPriceD3)']
+
+    pattern_dict['p92'] = ['daily_high2 = daily_high(dataset,2)',
+                           'dataset["p92"] = (dataset.daily_close>daily_high2)']
+    
+    pattern_dict['p93'] = ['daily_high2 = daily_high(dataset,2)',
+                           'dataset["p93"] = (dataset.daily_close<daily_high2)']
+    
+    pattern_dict['p94'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_high3 = daily_high(dataset,3)',
+                           'dataset["p94"] = (dataset.daily_close>daily_high2) & (dataset.daily_close>daily_high3)']
+    
+    pattern_dict['p95'] = ['daily_low2 = daily_low(dataset,2)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'dataset["p95"] = (dataset.daily_close<daily_low2) & (dataset.daily_close<daily_low3) ']
+    
+    pattern_dict['p96'] = ['dataset["p96"] = True']
+    
+    pattern_dict['p97'] = ['daily_low2 = daily_low(dataset,2)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'daily_low4 = daily_low(dataset,4)',
+                           'dataset["p97"] = (dataset.daily_close<daily_low2) & (dataset.daily_close<daily_low3) & (dataset.daily_close<daily_low4)']
+    
+    pattern_dict['p98'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_open2 = daily_open(dataset,2)',
+                           'dataset["p98"] = (dataset.daily_close>daily_high2) & (dataset.daily_close>dataset.daily_open) & (dataset.daily_close<daily_open2)']
+    
+    pattern_dict['p99'] = ['daily_low2 = daily_low(dataset,2)',
+                           'daily_open2 = daily_open(dataset,2)',
+                           'dataset["p99"] = (dataset.daily_close<daily_low2) & (dataset.daily_close<dataset.daily_open) & (dataset.daily_close>daily_open2)']
+    
+    pattern_dict['p100'] = ['daily_low2 = daily_low(dataset,2)',
+                            'daily_high2 = daily_high(dataset,2)',
+                            'myRangeD1 = dataset.daily_high - dataset.daily_low',
+                            'myRangeD2 = daily_high2 - daily_low2',
+                            'dataset["p100"] = (myRangeD1<myRangeD2)']
+    
+    pattern_dict['p101'] = ['daily_low5 = daily_low(dataset,5)',
+                            'daily_high5 = daily_high(dataset,5)',
+                            'myRangeD1 = dataset.daily_high - dataset.daily_low',
+                            'myRangeD5 = daily_high5 - daily_low5',
+                            'dataset["p101"] = (myRangeD1<myRangeD5)']
+    
+    pattern_dict['p102'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_high3 = daily_high(dataset,3)',
+                           'daily_high4 = daily_high(dataset,4)',
+                           'daily_high5 = daily_high(dataset,5)',
+                           'daily_high6 = daily_high(dataset,6)',
+                           'daily_high7 = daily_high(dataset,7)',
+                           'daily_high8 = daily_high(dataset,8)',
+                           'daily_high9 = daily_high(dataset,9)',
+                           'daily_high10 = daily_high(dataset,10)',
+                           'daily_low2 = daily_low(dataset,2)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'daily_low4 = daily_low(dataset,4)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_low6 = daily_low(dataset,5)',
+                           'daily_low7 = daily_low(dataset,7)',
+                           'daily_low8 = daily_low(dataset,8)',
+                           'daily_low9 = daily_low(dataset,9)',
+                           'daily_low10 = daily_low(dataset,10)',  
+                           'myRangeMaxD10 = (highest_serie(dataset.daily_high,daily_high2,daily_high3,daily_high4,daily_high5,daily_high6,daily_high7,daily_high8,daily_high9,daily_high10) - (lowest_serie(dataset.daily_low,daily_low2,daily_low3,daily_low4,daily_low5,daily_low6,daily_low7,daily_low8,daily_low9,daily_low10)))',
+                           'myRangeD1 = dataset.daily_high - dataset.daily_low',                            
+                           'dataset["p102"] = (myRangeD1<myRangeMaxD10)']
+    
+    pattern_dict['p103'] = ['daily_high2 = daily_high(dataset,2)',
+                           'daily_high3 = daily_high(dataset,3)',
+                           'daily_high4 = daily_high(dataset,4)',
+                           'daily_high5 = daily_high(dataset,5)',
+                           'daily_high6 = daily_high(dataset,6)',
+                           'daily_high7 = daily_high(dataset,7)',
+                           'daily_high8 = daily_high(dataset,8)',
+                           'daily_high9 = daily_high(dataset,9)',
+                           'daily_high0 = daily_high(dataset,10)',
+                           'daily_low2 = daily_low(dataset,2)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'daily_low4 = daily_low(dataset,4)',
+                           'daily_low5 = daily_low(dataset,5)',
+                           'daily_low6 = daily_low(dataset,5)',
+                           'daily_low7 = daily_low(dataset,7)',
+                           'daily_low8 = daily_low(dataset,8)',
+                           'daily_low9 = daily_low(dataset,9)',
+                           'daily_low0 = daily_low(dataset,10)', 
+                           'myRangeDelay1MaxD10 = highest_serie(daily_high2,daily_high3,daily_high4,daily_high5,daily_high6,daily_high7,daily_high8,daily_high9,daily_high0) - \
+                            lowest_serie(daily_low2,daily_low3,daily_low4,daily_low5,daily_low6,daily_low7,daily_low8,daily_low9,daily_low0)',
+                            'myRangeD1 = dataset.daily_high - dataset.daily_low',                            
+                            'dataset["p103"] = (myRangeD1>myRangeDelay1MaxD10)']
+    
+
+    pattern_dict['p104'] = ['daily_high2 = daily_high(dataset,2)',
+                            'daily_high3 = daily_high(dataset,3)',
+                            'daily_high4 = daily_high(dataset,4)',
+                            'myMaxDelay1HighD4 =  highest_serie(daily_high2,daily_high3,daily_high4)',
+                            'dataset["p104"] = (dataset.daily_close>myMaxDelay1HighD4)']
+    
+    pattern_dict['p105'] = ['daily_high2 = daily_high(dataset,2)',
+                            'daily_high3 = daily_high(dataset,3)',
+                            'daily_high4 = daily_high(dataset,4)',
+                            'daily_high5 = daily_high(dataset,5)',
+                            'myMaxDelay1HighD5 = highest_serie(daily_high2,daily_high3,daily_high4,daily_high5)',
+                            'dataset["p105"] = (dataset.daily_close>myMaxDelay1HighD5)']
+    
+    pattern_dict['p106'] = ['daily_low2 = daily_low(dataset,2)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'daily_low4 = daily_low(dataset,4)',
+                            'myMinDelay1LowD4 = lowest_serie(daily_low2,daily_low3,daily_low4)',
+                            'dataset["p106"] = (dataset.daily_close<myMinDelay1LowD4)']
+    
+    pattern_dict['p107'] = ['daily_low2 = daily_low(dataset,2)',
+                           'daily_low3 = daily_low(dataset,3)',
+                           'daily_low4 = daily_low(dataset,4)',
+                           'daily_low5 = daily_low(dataset,5)',                           
+                           'myMinDelay1LowD5 = lowest_serie(daily_low2,daily_low3,daily_low4,daily_low5)',
+                           'dataset["p107"] = (dataset.daily_close<myMinDelay1LowD5)']
+    
+    pattern_dict['p108'] = ['dataset["p108"] = True ']
+    pattern_dict['p109'] = ['dataset["p109"] = True ']
+    pattern_dict['p110'] = ['dataset["p110"] = True ']
+    pattern_dict['p111'] = ['dataset["p111"] = True ']
+    pattern_dict['p112'] = ['dataset["p112"] = True ']
+    pattern_dict['p113'] = ['dataset["p113"] = True ']
+
+    
+    pattern_dict['p114'] = ['daily_close2 = daily_close(dataset,2)',
+                            'dataset["p114"] = (dataset.daily_open<daily_close2)']
+    
+    pattern_dict['p115'] = ['daily_low3 = daily_low(dataset,3)',
+                            'dataset["p115"] = (dataset.daily_low<daily_low3)']
+    
+    pattern_dict['p116'] = ['daily_low2 = daily_low(dataset,2)',
+                            'daily_high2 = daily_high(dataset,2)',
+                            'dataset["p116"] = (dataset.daily_high-dataset.daily_low)<(daily_high2-daily_low2)']
+    
+    pattern_dict['p117'] = ['daily_high3 = daily_high(dataset,3)',
+                            'dataset["p117"] = (dataset.daily_high>daily_high3)']
+    
+    pattern_dict['p118'] = ['daily_low2 = daily_low(dataset,2)',
+                            'dataset["p118"] = (dataset.daily_low<daily_low2)']
+    
+    pattern_dict['p119'] = ['daily_high2 = daily_high(dataset,2)',
+                            'dataset["p119"] = (dataset.daily_high>daily_high2)']
+    
+    pattern_dict['p120'] = ['daily_open5 = daily_open(dataset,5)',
+                            'daily_high2 = daily_high(dataset,2)',
+                            'daily_high3 = daily_high(dataset,3)',
+                            'daily_high4 = daily_high(dataset,4)',
+                            'daily_high5 = daily_high(dataset,5)',
+                            'daily_low2 = daily_low(dataset,2)',
+                            'daily_low3 = daily_low(dataset,3)',
+                            'daily_low4 = daily_low(dataset,4)',
+                            'daily_low5 = daily_low(dataset,5)',                            
+                            'myMaxHighD5 = highest_serie(dataset.daily_high,daily_high2,daily_high3,daily_high4,daily_high5)',
+                            'myMinLowD5 = lowest_serie(dataset.daily_low,daily_low2,daily_low3,daily_low4,daily_low5)',
+                            'dataset["p120"] = (abs(daily_open5-dataset.daily_close)<0.66*(myMaxHighD5-myMinLowD5))']
+    
+    pattern_dict['p121'] = ['daily_high2 = daily_high(dataset,2)',
+                            'daily_high3 = daily_high(dataset,3)',
+                            'daily_high4 = daily_high(dataset,4)',
+                            'daily_high5 = daily_high(dataset,5)',
+                            'daily_low2 = daily_low(dataset,2)',
+                            'daily_low3 = daily_low(dataset,3)',
+                            'daily_low4 = daily_low(dataset,4)',
+                            'daily_low5 = daily_low(dataset,5)',                            
+                            'myMaxHighD5 = highest_serie(dataset.daily_high,daily_high2,daily_high3,daily_high4,daily_high5)',
+                            'myMinLowD5 = lowest_serie(dataset.daily_low,daily_low2,daily_low3,daily_low4,daily_low5)',
+                            'dataset["p121"] = (abs(dataset.daily_open-dataset.daily_close)<0.66*(myMaxHighD5-myMinLowD5))']
+    
+    
+    pattern_dict['p122'] = ['dataset["p122"] = (abs(dataset.daily_open-dataset.daily_close)<0.66*(dataset.daily_high-dataset.daily_low))']
+        
+    pattern_dict['p123'] = ['daily_low2 = daily_low(dataset,2)',
+                            'daily_high2 = daily_high(dataset,2)',
+                            'daily_high3 = daily_high(dataset,3)',
+                            'daily_low3 = daily_low(dataset,3)',
+                            'daily_high4 = daily_high(dataset,4)',
+                            'daily_low4 = daily_low(dataset,4)',                            
+                            'dataset["p123"] = (dataset.daily_high-dataset.daily_low)>0.66*(((dataset.daily_high-dataset.daily_low)+\
+                            (daily_high2-daily_low2)+(daily_high3-daily_low3)+\
+                            (daily_high4-daily_low4)/4))']
+    
+    pattern_dict['p124'] = ['daily_low2 = daily_low(dataset,2)',
+                            'daily_high2 = daily_high(dataset,2)',
+                            'daily_high3 = daily_high(dataset,3)',
+                            'daily_low3 = daily_low(dataset,3)',
+                            'daily_high4 = daily_high(dataset,4)',
+                            'daily_low4 = daily_low(dataset,4)',                            
+                            'dataset["p124"] = (dataset.daily_high-dataset.daily_low)<0.66*(((dataset.daily_high-dataset.daily_low)+\
+                            (daily_high2-daily_low2)+(daily_high3-daily_low3)+\
+                            (daily_high4-daily_low4)/4))']
+        
+    
+    pattern_dict['p125'] = ['weekly_low1 = weekly_low(dataset,1)',
+                            'weekly_open1 = weekly_open(dataset,1)',
+                            'weekly_close1 = weekly_close(dataset,1)',
+                            'weekly_high1 = weekly_high(dataset,1)',        
+                            'dataset["p125"] = abs((weekly_open1-weekly_close1)<0.75*(weekly_high1-weekly_low1))']
+    
+    pattern_dict['p125'] = ['weekly_low1 = weekly_low(dataset,1)',
+                            'weekly_open1 = weekly_open(dataset,1)',
+                            'weekly_close1 = weekly_close(dataset,1)',
+                            'weekly_high1 = weekly_high(dataset,1)',        
+                            'dataset["p125"] = abs((weekly_open1-weekly_close1)<0.75*(weekly_high1-weekly_low1))']
+        
+    pattern_dict['p126'] = ['weekly_low1 = weekly_low(dataset,1)',
+                            'weekly_open1 = weekly_open(dataset,1)',
+                            'weekly_close1 = weekly_close(dataset,1)',
+                            'weekly_high1 = weekly_high(dataset,1)',        
+                            'dataset["p126"] = abs((weekly_open1-weekly_close1)<0.50*(weekly_high1-weekly_low1))']
+    
+    pattern_dict['p127'] = ['weekly_low1 = weekly_low(dataset,1)',
+                            'weekly_open1 = weekly_open(dataset,1)',
+                            'weekly_close1 = weekly_close(dataset,1)',
+                            'weekly_high1 = weekly_high(dataset,1)',        
+                            'dataset["p127"] = abs((weekly_open1-weekly_close1)<0.25*(weekly_high1-weekly_low1))']
+    
+    pattern_dict['p128'] = ['daily_high2 = daily_high(dataset,2)',
+                            'daily_high3 = daily_high(dataset,3)',
+                            'daily_high4 = daily_high(dataset,4)',
+                            'daily_low2 = daily_low(dataset,2)',
+                            'daily_low3 = daily_low(dataset,3)',
+                            'daily_low4 = daily_low(dataset,4)',       
+                            'dataset["p128"] = ((daily_high4-daily_low4)<(daily_high3-daily_low3)) & ((daily_high3-daily_low3)<(daily_high2-daily_low2)) & ((daily_high2-daily_low2)<(dataset.daily_high-dataset.daily_low))']
+    
+    pattern_dict['p129'] = ['daily_high2 = daily_high(dataset,2)',
+                            'daily_high3 = daily_high(dataset,3)',
+                            'daily_high4 = daily_high(dataset,4)',
+                            'daily_low2 = daily_low(dataset,2)',
+                            'daily_low3 = daily_low(dataset,3)',
+                            'daily_low4 = daily_low(dataset,4)',       
+                            'dataset["p129"] = ((daily_high3-daily_low3)<(daily_high2-daily_low2))&((daily_high2-daily_low2)<(dataset.daily_high-dataset.daily_low))']
+    
+    pattern_dict['p130'] = ['daily_high2 = daily_high(dataset,2)',
+                            'daily_high3 = daily_high(dataset,3)',
+                            'daily_high4 = daily_high(dataset,4)',
+                            'daily_low2 = daily_low(dataset,2)',
+                            'daily_low3 = daily_low(dataset,3)',
+                            'daily_low4 = daily_low(dataset,4)',       
+                            'dataset["p130"] = ((daily_high4-daily_low4)>(daily_high3-daily_low3)) & ((daily_high3-daily_low3)>(daily_high2-daily_low2)) & ((daily_high2-daily_low2)>(dataset.daily_high-dataset.daily_low))']
+    
+    pattern_dict['p131'] = ['daily_high2 = daily_high(dataset,2)',
+                            'daily_high3 = daily_high(dataset,3)',
+                            'daily_high4 = daily_high(dataset,4)',
+                            'daily_low2 = daily_low(dataset,2)',
+                            'daily_low3 = daily_low(dataset,3)',
+                            'daily_low4 = daily_low(dataset,4)',       
+                            'dataset["p131"] = ((daily_high3-daily_low3)>(daily_high2-daily_low2)) & ((daily_high2-daily_low2)>(dataset.daily_high-dataset.daily_low))']
+    
+    pattern_dict['p132'] = ['dataset["p132"] = (dataset.daily_close-dataset.daily_low)<(dataset.daily_high-dataset.daily_low)/4']
+    
+    pattern_dict['p133'] = ['dataset["p133"] = (dataset.daily_high-dataset.daily_close)<(dataset.daily_high-dataset.daily_low)/4']
+    
+    pattern_dict['p134'] = ['dataset["p134"] = (dataset.daily_close-dataset.daily_low)<(dataset.daily_high-dataset.daily_low)/3']
+    
+    pattern_dict['p135'] = ['dataset["p135"] = (dataset.daily_high-dataset.daily_close)<(dataset.daily_high-dataset.daily_low)/4']
+    
+    pattern_dict['p136'] = ['dataset["p136"] = (dataset.daily_close-dataset.daily_low)<(dataset.daily_high-dataset.daily_low)/2']
+    
+    pattern_dict['p137'] = ['dataset["p137"] = (dataset.daily_high-dataset.daily_close)<(dataset.daily_high-dataset.daily_low)/2']
+    
+    pattern_dict['p138'] = ['daily_open0 = daily_open(dataset,0)',                            
+                            'dataset["p138"] = (daily_open0 > dataset.daily_high)']
+    
+    pattern_dict['p139'] = ['daily_open0 = daily_open(dataset,0)',                            
+                            'dataset["p139"] = (daily_open0<dataset.daily_high)']
+    
+    pattern_dict['p140'] = ['daily_open0 = daily_open(dataset,0)',                            
+                            'dataset["p140"] = (daily_open0<dataset.daily_low)']
+    
+    pattern_dict['p141'] = ['daily_open0 = daily_open(dataset,0)',
+                            'daily_high2 = daily_high(dataset,2)',                            
+                            'dataset["p141"] = (daily_open0<=daily_high2)']
+    
+    pattern_dict['p142'] = ['daily_open0 = daily_open(dataset,0)',
+                            'daily_high2 = daily_high(dataset,2)',                            
+                            'dataset["p142"] = (daily_open0>daily_high2)']
+    
+    pattern_dict['p143'] = ['daily_open0 = daily_open(dataset,0)',
+                            'daily_low3 = daily_low(dataset,3)',                            
+                            'dataset["p143"] = (daily_open0>daily_low3)']
+    
+    pattern_dict['p144'] = ['daily_open0 = daily_open(dataset,0)',
+                            'daily_open2 = daily_open(dataset,2)',                            
+                            'dataset["p144"] = (daily_open0>daily_open2)']
+    
+    pattern_dict['p145'] = ['daily_open0 = daily_open(dataset,0)',
+                            'daily_open2 = daily_open(dataset,2)',                            
+                            'dataset["p145"] = (daily_open0<daily_open2)']
+    
+    pattern_dict['p146'] = ['daily_low2 = daily_low(dataset,2)',                            
+                            'dataset["p146"] = (dataset.daily_close>daily_low2)']
+    
+    pattern_dict['p147'] = ['daily_low2 = daily_low(dataset,2)',                            
+                            'dataset["p147"] = (dataset.daily_close<daily_low2)']
+    
+    pattern_dict['p148'] = ['daily_close2 = daily_close(dataset,2)',                            
+                            'dataset["p148"] = (dataset.daily_close>daily_close2)']
+    
+    pattern_dict['p149'] = ['daily_close2 = daily_close(dataset,2)',                            
+                            'dataset["p149"] = (dataset.daily_close<daily_close2)']
+    
+    pattern_dict['p150'] = ['daily_close2 = daily_close(dataset,2)',
+                            'daily_close3 = daily_close(dataset,3)',                            
+                            'dataset["p150"] = (daily_close2 < daily_close3)']
+
+    return pattern_dict
+
