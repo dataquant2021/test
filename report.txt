@@ -1,0 +1,23 @@
+def report(tradelist,initial_capital,type_analisy,Benchmark):
+    %matplotlib inline
+    import quantstats as qs
+    qs.extend_pandas()
+
+    tradelist = tradelist.fillna(0)
+    tradelist = tradelist[tradelist!=0]
+    tradelist.iloc[0] = tradelist.iloc[0]+initial_capital
+    tradelist = tradelist.cumsum()
+    
+    if type_analisy == 0:
+        qs.plots.snapshot(tradelist)
+    if type_analisy == 1:    
+        if len(Benchmark)>0:
+            qs.reports.basic(tradelist,Benchmark)
+        else:
+            qs.reports.basic(tradelist)
+    if type_analisy == 2:    
+        if len(Benchmark)>0:
+            qs.reports.full(tradelist,Benchmark)
+        else:
+            qs.reports.full(tradelist)
+            
