@@ -1,0 +1,155 @@
+def plot_equity_GSA(dna):
+    
+    
+    
+    gains = all_gains_full(dna)
+    if GSA == 1:
+        ls_os = np.array_split(gains,GSA_SPLIT)[1::2]
+        if len(ls_os)>1:
+            l_lst=[]
+            for nls in ls_os:
+                l_lst.append([nls[0][0],nls[-1][0]])
+            for ln in range(len(l_lst)):
+                #if ln != len(l_lst)-1:
+                a2,a2b=l_lst[ln][0], l_lst[ln][-1]
+                plt.axvspan(a2,a2b,alpha=0.2, color='red',label ="")
+    if len(gains)>0:
+        times, gains = zip(*gains)
+        profits = np.array(gains).cumsum()
+        equity = pd.Series(profits, times)
+        equity.plot(figsize=(14, 8), grid = True, label="main strategies")
+        plt.axvline(x=OOS_date ,color="red")
+
+
+"""def all_gains(dna):
+    
+    rule = setups(numba.typed.List(dna))
+    rule.setflags(write=1)
+    rule=rule[:Out_Of_Sample_pct]
+    gains = numba_engine(rule,TIME_EXIT,gains_array[:Out_Of_Sample_pct],COSTS_FIXED)
+    tmp_times_array = times_array[:Out_Of_Sample_pct]
+    ls=[]
+    for e in range(len(gains)):
+        if gains[e]!=0:
+            ls.append([tmp_times_array[e],gains[e]])
+    if INSTABILITY_FACTOR>0:
+        ls = instability(ls,INSTABILITY_FACTOR)
+    if GSA == 1:
+        ls_is , ls_os =fast_GSA(ls,GSA_SPLIT)
+        if len(ls_is)>1:
+            ls=merge_lst(ls_is)            
+    return ls"""
+
+def OOS(dataset,pct):
+    if pct == 0:
+        return len(dataset)
+    else:
+        return int(len(dataset) - (len(dataset) // (100/pct)))
+    
+def instability(array,pct):
+    dimension = int(len(array) - (len(array) // (100/pct)))
+    rng = np.random.default_rng()
+    rand_array=rng.choice(array, dimension)
+    return np.array(sorted(sorted(rand_array,key=lambda e:e[1]),key=lambda e:e[0]))
+
+def fast_GSA(dataframe,n_split):
+    newdf_split = np.array_split(dataframe, n_split)
+    return np.concatenate(newdf_split[0::2]) , np.concatenate(newdf_split[1::2])
+
+def merge_lst(a):
+    import collections
+    super_dict = collections.defaultdict(list)
+    for e in a:
+        super_dict[e[0]].append(e[1])
+    dictlist=list()
+    for key, value in super_dict.items():
+        dictlist.append([key]+value)
+    return dictlist
+
+
+def plot_equity_full(dna,secondary_equity):
+    """
+    Funzione che grafichi l'equity line risultatnte 
+    dato un DNA.
+    """
+    gains = all_gains_full(dna)
+    if len(gains)>0:
+        gains=stack_sort(gains,secondary_equity)
+        times, gains = zip(*gains)
+        profits = np.array(gains).cumsum()
+        equity = pd.Series(data=profits, index=times)
+        equity.index=pd.to_datetime(equity.index)
+        equity.plot(figsize=(14, 8), grid = True, color="green")
+        dataset.close.plot(secondary_y=True,color="grey",linewidth=0.3)
+        plt.axvline(x=OOS_date ,color="red")
+        
+def Shift(rule):
+    return list(pd.Series(rule).shift(1 , fill_value=False).values)
+
+def all_gains(dna):
+    rule = setups(numba.typed.List(dna))
+    rule = Shift(rule)
+    cond=rule[:Out_Of_Sample_pct]
+    ls = new_engine(TIME_EXIT,START_SESSION,END_SESSION,cond,cond_idx,cond_date,price,DIRECTION,COSTS_FIXED) 
+    if INSTABILITY_FACTOR>0:
+        ls = instability(ls,INSTABILITY_FACTOR)
+    if GSA == 1:
+        ls_is , ls_os =fast_GSA(ls,GSA_SPLIT)
+        if len(ls_is)>1:
+            ls=merge_lst(ls_is)            
+    return ls
+
+def all_gains_full(dna):   
+    rule = setups(numba.typed.List(dna))
+    rule = Shift(rule)
+    ls = new_engine(TIME_EXIT,START_SESSION,END_SESSION,rule,cond_idx,cond_date,price,DIRECTION,COSTS_FIXED)
+    return ls
+
+def new_engine(TIME_EXIT,START_SESSION,END_SESSION,cond,cond_idx,cond_date,price,DIRECTION,COSTS_FIXED):
+    operations=[]
+    date_ls=[]
+    last=0
+    for first in np.where(cond)[0]:
+        if first > last:
+            if (cond_idx[first] >= START_SESSION)&(cond_idx[first] <= END_SESSION):
+                if (cond_idx[first]+TIME_EXIT)<END_SESSION:
+                    if (first+TIME_EXIT)>=len(price):
+                        tmp_price_idx=len(price)-1
+                    else:
+                        tmp_price_idx = first+TIME_EXIT
+                    operation = (price[tmp_price_idx]-price[first])*BIGPOINTVALUE ###1
+                    if DIRECTION == "short":
+                        operation = operation*(-1)
+                    operations.append([cond_date[first],operation-COSTS_FIXED])
+                    last=first+TIME_EXIT
+                else:
+                    TIME_EXIT_EOD = END_SESSION-cond_idx[first]
+                    if (first+TIME_EXIT_EOD)>=len(price):
+                        tmp_price_idx=len(price)-1
+                    else:
+                        tmp_price_idx = first+TIME_EXIT_EOD  
+                    operation = (price[tmp_price_idx]-price[first])*BIGPOINTVALUE ###2
+                    if DIRECTION == "short":
+                        operation = operation*(-1)
+                    operations.append([cond_date[first],operation-COSTS_FIXED])  
+                    last=first+TIME_EXIT_EOD  
+    return operations
+
+def stack_sort(gains,secondary_equity):
+    if len(secondary_equity)>2:
+        c=np.vstack((gains,secondary_equity))  
+        d=sorted(c,key=lambda x: x[0])
+        return d
+    else:
+        return gains
+    
+def secondary_OOS(secondary_equity ,OOS_date):
+    if len(secondary_equity )>2:
+        return[e for e in secondary_equity  if e[0] < OOS_date]
+    else:
+        return secondary_equity 
+    
+def pattern_formula(last_dna):
+    regola = dna_formula(last_dna)
+    regola=regola.replace("p","dataset.p")
+    return regola
