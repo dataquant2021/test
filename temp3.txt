@@ -1,0 +1,84 @@
+def BK_Plus(history,direzione,entry_rule,exit_rule,bigpointvalue,tick,level,tipo_ordine,exit_bars,TP,SL,costi,ADD_RULE_CONDITION):
+
+    entry = np.array(np.array(eval(entry_rule)) & np.array(level_to_condition(level,history,tipo_ordine,direzione)) & check_add_rule(ADD_RULE_CONDITION,history))
+    loss = np.array(check_stoploss(SL,history,eval(level),bigpointvalue,direzione))
+    gain = np.array(check_takeprofit(TP,history,eval(level),bigpointvalue,direzione))
+    if exit_rule != "False":
+        exit_rule = np.array(eval(exit_rule))
+    else:
+        exit_rule = np.array([False]*len(entry))   
+        
+    price = np.array(history.open)
+    index_date = np.array(history.index)
+
+
+    start = time.time()
+    big_ls=[]
+    MP = 0
+    while True:
+        if exit_bars == 0:
+            exit_bars = 999999999
+        ingresso = np.where(entry==True)[0]  
+        if ingresso.size >0:
+            ingresso=ingresso[0]+1
+            uscita_a_barre = ingresso+exit_bars
+
+            uscita_a_loss = np.where(loss==True)[0] 
+            uscita_a_loss = uscita_a_loss[uscita_a_loss>=ingresso]
+            if uscita_a_loss.size == 0:
+                uscita_a_loss = 999999999
+            else:
+                uscita_a_loss = uscita_a_loss[0]+1
+
+            uscita_a_gain = np.where(gain==True)[0]
+            uscita_a_gain = uscita_a_gain[uscita_a_gain>=ingresso]
+            if uscita_a_gain.size == 0:
+                uscita_a_gain = 999999999
+            else:
+                uscita_a_gain = uscita_a_gain[0]+1
+
+            uscita_a_rule = np.where(exit_rule==True)[0]
+            uscita_a_rule = uscita_a_rule[uscita_a_rule>=ingresso]
+            if uscita_a_rule.size == 0:
+                uscita_a_rule = 999999999
+            else:
+                uscita_a_rule = uscita_a_rule[0]+1    
+
+            first_exit = np.sort([uscita_a_barre,uscita_a_loss,uscita_a_gain,uscita_a_rule])[0]
+            if price.size <= first_exit:  ####
+                first_exit = price.size-1   ####
+                MP = 1
+
+            operation = ((price[first_exit]-price[ingresso])*bigpointvalue)
+            if direzione == "short":
+                operation=operation*(-1)
+                operation=operation-costi
+            else:
+                operation=operation-costi
+            index_start = index_date[ingresso]
+            index_exit = index_date[first_exit]
+            big_ls.append([index_start,index_exit,price[ingresso],price[first_exit],np.round_(operation, decimals=2),MP])
+
+            entry = entry[first_exit:]
+            loss = loss[first_exit:]
+            gain = gain[first_exit:]
+            exit_rule = exit_rule[first_exit:]
+            price = price[first_exit:]
+            index_date = index_date[first_exit:]
+        else:
+            break
+        if MP == 1:
+            break
+
+    end = time.time()
+    print("Backtest strategia ..." , end - start)
+
+    if len(big_ls)>0:
+        op=pd.DataFrame(big_ls)
+        op.columns=(["entry_time","exit_time","prezzo_ingresso","prezzo_uscita","operations","MP"])
+        op["direzione"]=direzione
+        op.set_index(["exit_time"],inplace=True)
+        op.index=pd.to_datetime(op.index)
+        return op
+    else:
+        return pd.DataFrame(columns=(["entry_time","exit_time","prezzo_ingresso","prezzo_uscita","operations","MP"]))
