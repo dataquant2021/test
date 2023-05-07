@@ -1,0 +1,34 @@
+def new_engine_check(TIME_EXIT,START_SESSION,END_SESSION,CLOSE_SESSION,cond,cond_idx,cond_date,price,DIRECTION,COSTS_FIXED):
+    
+    "VErsione 2 - Session e Exit"
+    
+    operations=[]
+    date_ls=[]
+    last=0
+    
+    for first in np.where(cond)[0]:
+        if (first >= last) :  
+            if (cond_idx[first] >= START_SESSION-1)&(cond_idx[first] <= END_SESSION-1):
+                first = first +1
+                if (cond_idx[first]+TIME_EXIT)<CLOSE_SESSION:
+                    if (first+TIME_EXIT)>=len(price):
+                        tmp_price_idx=len(price)-1
+                    else:
+                        tmp_price_idx = first+TIME_EXIT
+                    operation = (price[tmp_price_idx]-price[first])*BIGPOINTVALUE ###1
+                    if DIRECTION == "short":
+                        operation = operation*(-1)
+                    operations.append([cond_date[first],cond_date[tmp_price_idx],operation-COSTS_FIXED])
+                    last=first+TIME_EXIT
+                else:
+                    TIME_EXIT_EOD = CLOSE_SESSION-cond_idx[first]
+                    if (first+TIME_EXIT_EOD)>=len(price):
+                        tmp_price_idx=len(price)-1
+                    else:
+                        tmp_price_idx = first+TIME_EXIT_EOD                        
+                    operation = (price[tmp_price_idx]-price[first])*BIGPOINTVALUE ###2
+                    if DIRECTION == "short":
+                        operation = operation*(-1)
+                    operations.append([cond_date[first],cond_date[tmp_price_idx],operation-COSTS_FIXED])  
+                    last=first+TIME_EXIT_EOD  
+    return operations
