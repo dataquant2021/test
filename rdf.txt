@@ -1,0 +1,61 @@
+newdf = df_spread.resample("W").sum().copy()
+
+df = newdf.copy()
+
+w=df.std().to_frame()
+w.columns=(["STD"])
+w["MAX"] = w.STD.max()
+w["W"] = w.MAX/w.STD
+
+for e in df.columns:
+    S = w.W[w.index==e]
+    df[e] = df[e] * float(S)
+    
+dft_r = df.rank(axis=1)
+
+dft = df.copy()
+for e in dft.columns:
+    dft["STF_"+e] = dft[e].shift(1 , fill_value=0)
+    dft["SMA_"+e] = dft[e].rolling(5).mean()
+    dft["SMA_"+e] = dft["SMA_"+e].fillna(0)
+
+X = dft.copy()
+X = pd.concat([X , dft_r],axis=1)
+
+y = dft_r.copy()
+y = y.shift(-1,fill_value=1)
+
+from sklearn.ensemble import RandomForestRegressor
+model = RandomForestRegressor(max_depth=7, n_estimators=100,  n_jobs=-1, random_state=111)
+
+
+nop = 20
+N_STRATEGY = 50
+
+X_train = X.iloc[:-nop]
+X_test = X.iloc[-nop:] 
+y_train = y.iloc[:-nop]
+y_test = y.iloc[-nop:]
+
+model.fit(X_train,y_train)
+pred=(model.predict(X))
+ret = pd.DataFrame(pred)
+ret.index = y.index
+ret.columns = y.columns
+
+ret = ret.shift(1 , fill_value = 1)
+ret = ret.rank(axis=1)
+ret[ret<(y.max(axis=1)[0]-N_STRATEGY)]=0
+ret[ret!=0]=1
+df2 = df * ret
+
+df.sum(axis=1).cumsum().plot(figsize=(20,10),label = "Ptf Full")
+df2.sum(axis=1).cumsum().plot(figsize=(20,10),label = "Ptf")
+df.sum(axis=1).cumsum().plot(figsize=(20,10),label = "Ptf Full")
+plt.axvline(x=y_test.index[0],color="red")
+plt.legend()
+plt.show()
+df2.iloc[-nop+1:].sum(axis=1).cumsum().plot(figsize=(20,10),label = "Ptf OOS")
+df.iloc[-nop+1:].sum(axis=1).cumsum().plot(figsize=(20,10),label = "Ptf Full OOS",secondary_y=True)
+plt.legend()
+plt.show()
