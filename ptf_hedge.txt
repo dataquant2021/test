@@ -1,0 +1,168 @@
+OOS = "2023-01-01"
+np_arr = newdf.loc[:OOS].values.T
+np_arr_name = newdf.columns.to_list()
+
+
+#######################################################
+
+import numpy as np
+import matplotlib.pyplot as plt 
+from scipy import stats
+%matplotlib inline
+import matplotlib.pyplot as plt
+from tqdm.notebook import tqdm
+
+def kestner_ratio_np(operations):
+   
+    monthly_equity = np.cumsum(operations)
+    index = np.array(np.arange(1,len(operations) + 1))
+    
+    x = index
+    y = monthly_equity
+    gradient, intercept, r_value, p_value, std_err = stats.linregress(x,y)
+    
+    if std_err != 0 and len(index) > 0:
+        return round(gradient / (std_err * len(index)),5)
+    else:
+        return np.inf
+    
+res=[]
+df_hg = pd.DataFrame()
+results=pd.DataFrame()
+for e in tqdm(range(len(np_arr))):
+    for i in range(len(np_arr)):
+        if np_arr_name[e]!=np_arr_name[i]:
+            STD = np_arr[e].std()/np_arr[i].std()
+            sec = np_arr[i]*STD
+            x=np_arr[e]+sec
+            if np.corrcoef(np_arr[e], sec)[1][0] < 0:
+                kr=kestner_ratio_np(x)
+                if kr != np.inf:
+                    res.append([np_arr_name[e],np_arr_name[i],kr,STD])
+                    
+                    
+results = pd.DataFrame(res)
+results.columns=(["v1","v2","kr","STD"])
+results = results.sort_values(by="kr" , ascending=False)
+results.reset_index(inplace=True)
+results.drop(["index"],inplace=True,axis=1)
+results = results.iloc[range(0,len(results),2)]
+results.reset_index(inplace=True)
+results.drop(["index"],inplace=True,axis=1)
+results.head(10)
+
+###################################################################################
+
+i=13
+
+x=newdf[results.iloc[:,:2].iloc[i].values]
+x.iloc[:,1]=x.iloc[:,1]*results.STD.iloc[i]
+x=x[x!=0].fillna(0)
+
+x.cumsum().plot(figsize=(10,10))
+plt.axvline(x=OOS,color="r")
+plt.show()
+x.sum(axis=1).cumsum().plot(figsize=(10,10),title="Portfolio")
+plt.axvline(x=OOS,color="r")
+plt.legend()
+plt.show()
+
+###################################################################################
+
+stampa = 0
+N_SPREAD = 25
+
+today_orders = pd.DataFrame(columns=["pnl","cum","sma","newbal","sng_for_tomorrow","market_1","market_2","market_1_size","market_2_size","v_SMA"])
+portfolio = pd.DataFrame()
+while True:
+    for i in tqdm(range(len(results))):
+
+        x=newdf[results.iloc[:,:2].iloc[i].values]
+        x.iloc[:,1]=x.iloc[:,1]*results.STD.iloc[i]
+        x=x[x!=0].fillna(0)
+                
+        if stampa == 1:
+            x.cumsum().plot(figsize=(10,10))
+            plt.show()
+            x.sum(axis=1).cumsum().plot(figsize=(10,10),title="Portfolio")
+            plt.legend()
+            plt.show()
+
+
+        a=x.copy().sum(axis=1).to_frame()
+        a.columns=(["pnl"])
+
+        a["sng_for_tomorrow"]=1
+        a["market_1"] = x.columns[0]
+        a["market_2"] = x.columns[1]
+        a["market_1_size"]=1
+        a["market_2_size"]=results.STD.iloc[i]
+        a["v_SMA"]=0
+        if stampa == 1:
+            a[["pnl","newbal"]].cumsum().plot(figsize=(10,10))
+        
+        if a.iloc[-1:].sng_for_tomorrow[-1] == 1:
+            if (a["market_1"].iloc[0] not in [*today_orders["market_1"].values, *today_orders["market_2"].values])&\
+               (a["market_2"].iloc[0] not in [*today_orders["market_1"].values, *today_orders["market_2"].values]):
+                    today_orders = pd.concat([today_orders,a.iloc[-1:]])
+                    tmp_df = x.sum(axis=1).to_frame()
+                    tmp_df.columns = ([a["market_1"].iloc[0]+"_"+a["market_2"].iloc[0]])
+                    portfolio=pd.concat([portfolio,tmp_df],axis=1).fillna(0)
+   
+        if len(today_orders)>=N_SPREAD:
+            print("Deviazione Standard")
+            display(x.std())
+            break
+    if len(today_orders)>=N_SPREAD:
+        break
+
+################################################################################################
+
+w=portfolio.loc[:OOS].std().to_frame("STD")
+w["STD_MAX"] = w.STD.max()
+w["peso"]=round((w.STD_MAX/w.STD),2)
+w
+
+##############################################################################################
+
+for e in portfolio.columns:
+    W = float(w.peso[w.index==e])
+    portfolio[e]=portfolio[e]*W
+
+##############################################################################################
+
+
+portfolio.cumsum().plot(figsize=(20,10),grid=True,legend=None)
+plt.axvline(x=OOS,color="r")
+plt.show()
+portfolio.sum(axis=1).cumsum().plot(figsize=(20,10),grid=True)
+plt.axvline(x=OOS,color="r")
+plt.show()
+portfolio.loc[OOS:].sum(axis=1).cumsum().plot(figsize=(20,10),grid=True)
+plt.show()
+
+##############################################################################################
+
+
+today_orders["peso"] = 0
+for e in range(len(today_orders)):
+    x=today_orders.iloc[e].market_1+"_"+today_orders.iloc[e].market_2
+    W = float(w.peso[w.index==x])
+    today_orders["peso"].iloc[e]=W
+    
+today_orders["market_1_RE_size"] = today_orders.market_1_size * today_orders.peso
+today_orders["market_2_RE_size"] = round((today_orders.market_2_size * today_orders.peso),2)    
+
+##############################################################################################
+
+strategy_ok = today_orders[["market_1","market_1_RE_size"]]
+strategy_ok.columns=(["strategy","Size"])
+strategy_ok1 = today_orders[["market_2","market_2_RE_size"]]
+strategy_ok1.columns=(["strategy","Size"])
+strategy = pd.concat([strategy_ok,strategy_ok1])
+strategy
+
+
+
+
+
