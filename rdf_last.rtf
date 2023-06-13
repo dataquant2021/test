@@ -1,0 +1,85 @@
+{\rtf1\ansi\ansicpg1252\cocoartf1561\cocoasubrtf600
+{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww10800\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0     newdf = df_spread.resample("B").sum().copy()\
+\
+    #sel = [e for e in newdf.columns if "AUDNZD" in e]\
+\
+    df =  newdf.copy() ##portfolio.copy() #\
+    #for e in df.columns:\
+    #    df[e+"_INV"] = -df[e]\
+\
+    w=df.std().to_frame()\
+    w.columns=(["STD"])\
+    w["MAX"] = w.STD.max()\
+    w["W"] = w.MAX/w.STD\
+\
+    #for e in df.columns:\
+    #    S = w.W[w.index==e]\
+    #    df[e] = df[e] * float(S)\
+\
+    dfb = df.copy()\
+    dfb[dfb>0]=1\
+    dfb[dfb<0]=2\
+    X = df.cumsum()\
+\
+    from sklearn.linear_model import LogisticRegression\
+    from sklearn.model_selection import train_test_split\
+    from sklearn.svm import SVC\
+    from sklearn.utils.class_weight import compute_class_weight\
+\
+    \
+    \
+    for e in tqdm(range(len(df.columns))):\
+        y = dfb.iloc[:, e].shift(-1, fill_value=0)\
+        T_STOP = y[y!=0].iloc[-30:]\
+        STOP = T_STOP.index[0]\
+        LS_STOP = T_STOP.index\
+        y[y==0]=np.nan\
+        y=y.ffill()\
+        y=y.fillna(1)\
+\
+        # Suddivisione del dataset in set di addestramento e set di test\
+        #X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.02, random_state=42, shuffle=False)\
+\
+        nop = 100\
+        X_train = X.loc[:STOP]\
+        X_test = X.loc[STOP:] \
+        y_train = y.loc[:STOP]\
+        y_test = y.loc[STOP:]\
+\
+        # Calcola il peso tra le classi\
+        class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)\
+\
+        # Crea un classificatore di regressione logistica con peso tra le classi\
+        clf = RandomForestClassifier(n_jobs=-1,random_state=1,max_depth=7)\
+        #clf = LogisticRegression(class_weight=dict(enumerate(class_weights)))\
+        # Addestramento del modello sul set di addestramento\
+        clf.fit(X_train, y_train)\
+\
+        # Valutazione dell'accuratezza sul set di test\
+        accuracy = clf.score(X_train, y_train)\
+        accuracy2 = clf.score(X_test, y_test)\
+        tmp2 = y_test.to_frame("test")\
+        tmp2["pred"] = clf.predict(X_test)\
+        tmp2=tmp2[tmp2.index.isin(LS_STOP)].dropna()\
+        accuracy3 = accuracy_score(tmp2.test,tmp2.pred)\
+        # Stampa l'accuratezza\
+        print("Accuratezza Train:", accuracy)\
+        #print("Accuratezza Test:", accuracy2)\
+        print("Accuratezza Test:", accuracy3)\
+        if accuracy3 >=0.65:\
+            pred = clf.predict(X)\
+            pred = np.where(pred==2,-1,pred)\
+            tmp_df = df.iloc[:,e].to_frame(dfb.iloc[:,e].name)\
+            tmp_df["pred"] = pred\
+            tmp_df["new_bal"] = tmp_df.iloc[:,0] * tmp_df.pred.shift(1)\
+            tmp_df["new_bal"].cumsum().plot()\
+            plt.axvline(x=y_test.index[0],color="red")\
+            plt.show()\
+            df3=pd.concat([df3,tmp_df.new_bal.to_frame(dfb.iloc[:,e].name)],axis=1).fillna(0)\
+            ls.append([dfb.iloc[:,e].name,tmp_df["pred"].iloc[-1]])}
