@@ -1,0 +1,114 @@
+
+    dfb = df.copy()
+    dfb[dfb>0]=1
+    dfb[dfb<0]=2
+    X = df.cumsum()
+
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import train_test_split
+    from sklearn.svm import SVC
+    from sklearn.utils.class_weight import compute_class_weight
+
+    
+    
+    for e in tqdm(range(len(df.columns))):
+        y = dfb.iloc[:, e].shift(-1, fill_value=0)
+        T_STOP = y[y!=0].iloc[-30:]
+        STOP = T_STOP.index[0]
+        LS_STOP = T_STOP.index
+        y[y==0]=np.nan
+        y=y.ffill()
+        y=y.fillna(1)
+
+        # Suddivisione del dataset in set di addestramento e set di test
+        #X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.02, random_state=42, shuffle=False)
+
+        nop = 100
+        X_train = X.loc[:STOP]
+        X_test = X.loc[STOP:] 
+        y_train = y.loc[:STOP]
+        y_test = y.loc[STOP:]
+
+        # Calcola il peso tra le classi
+        class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+
+        # Crea un classificatore di regressione logistica con peso tra le classi
+        clf = RandomForestClassifier(n_jobs=-1,random_state=1,max_depth=None)
+        #clf = LogisticRegression(class_weight=dict(enumerate(class_weights)))
+        # Addestramento del modello sul set di addestramento
+        clf.fit(X_train, y_train)
+
+        # Valutazione dell'accuratezza sul set di test
+        accuracy = clf.score(X_train, y_train)
+        accuracy2 = clf.score(X_test, y_test)
+        tmp2 = y_test.to_frame("test")
+        tmp2["pred"] = clf.predict(X_test)
+        tmp2=tmp2[tmp2.index.isin(LS_STOP)].dropna()
+        accuracy3 = accuracy_score(tmp2.test,tmp2.pred)
+        # Stampa l'accuratezza
+        print("Accuratezza Train:", accuracy)
+        #print("Accuratezza Test:", accuracy2)
+        print("Accuratezza Test:", accuracy3)
+        if accuracy3 >=0.65:
+            pred = clf.predict(X)
+            pred = np.where(pred==2,-1,pred)
+            tmp_df = df.iloc[:,e].to_frame(dfb.iloc[:,e].name)
+            tmp_df["pred"] = pred
+            tmp_df["new_bal"] = tmp_df.iloc[:,0] * tmp_df.pred.shift(1)
+            tmp_df["new_bal"].cumsum().plot()
+            plt.axvline(x=y_test.index[0],color="red")
+            plt.show()
+            df33=pd.concat([df33,tmp_df.new_bal.to_frame(dfb.iloc[:,e].name)],axis=1).fillna(0)
+            ls.append([dfb.iloc[:,e].name,tmp_df["pred"].iloc[-1]])
+    
+    if len(df33.columns)>10:
+        best_str = get_best_strategy(df33)
+        df33 = df33[best_str]
+        ls2=[]
+        for e in ls:
+            if e[0] in best_str:
+                ls2.append(e)
+        ls = ls2
+    
+    ls_full.extend(ls)
+    df3 = pd.concat([df3,df33],axis=1).fillna(0)
+
+
+def get_best_strategy(df3):
+
+    import pandas as pd
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import train_test_split
+
+    strategies_df = df3.reset_index()
+    strategies_df = strategies_df.iloc[:,2:]
+
+    # Calcola la percentuale di vincita per ogni strategia
+    strategies_df['Win_Percentage'] = strategies_df[strategies_df > 0].count(axis=1) / len(strategies_df.columns)
+
+
+    # Dividi il dataframe in features (PNL) e target (vincita o perdita)
+    features = strategies_df.drop(columns='Win_Percentage').values
+    target = (strategies_df['Win_Percentage'] > 0).astype(int).values
+
+    # Dividi il dataset in set di addestramento e test
+    X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.2, random_state=42 , shuffle=False)
+
+    # Addestra un modello di classificazione (Random Forest)
+    model = RandomForestClassifier()
+    model.fit(X_train, y_train)
+
+    # Calcola l'importanza delle features
+    feature_importance = model.feature_importances_
+
+    # Crea una Serie di pandas con l'importanza delle features
+    importance_series = pd.Series(feature_importance, index=strategies_df.columns[:-1])
+
+    # Ordina le strategie in base all'importanza delle features
+    strategies_df['Feature_Importance'] = importance_series
+    top_10_strategies = strategies_df.nlargest(10, 'Feature_Importance')
+
+    # Stampa le strategie selezionate
+    top_10_strategies = importance_series.sort_values(ascending=False).iloc[:10].index.to_list()
+
+    return top_10_strategies
