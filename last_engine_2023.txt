@@ -1,0 +1,42 @@
+def new_engine_2023(TIME_EXIT,START_SESSION,END_SESSION,cond,cond_idx,cond_date,price,DIRECTION,COSTS_FIXED):  #### motore backtest genetico x end of day
+    operations=[]
+    date_ls=[]
+    last=0
+    for first in np.where(cond)[0]:
+        first =first +1
+        if (first > last)&(first<len(cond)):
+   
+            if (cond_idx[first] >= START_SESSION)&(cond_idx[first] <= END_SESSION):
+        
+                if (cond_idx[first]+TIME_EXIT)<=END_SESSION:
+                
+                    operation = (price[first+TIME_EXIT]-price[first])*BIGPOINTVALUE
+                
+                    if DIRECTION == "short":
+                        operation = operation*(-1)
+                        
+                    operations.append([cond_date[first+TIME_EXIT],operation-COSTS_FIXED])
+                    
+                    last=first+TIME_EXIT
+                    
+                else:
+                    
+                    TIME_EXIT_EOD = END_SESSION-cond_idx[first]+1
+                    try:
+                        operation = (price[first+TIME_EXIT_EOD]-price[first])*BIGPOINTVALUE
+                        if DIRECTION == "short":
+                            operation = operation*(-1)
+
+                        operations.append([cond_date[first+TIME_EXIT_EOD],operation-COSTS_FIXED])
+                        
+                    except:
+                        
+                        operation = (price[-1]-price[first])*BIGPOINTVALUE
+                        if DIRECTION == "short":
+                            operation = operation*(-1)
+                        
+                        operations.append([cond_date[-1],operation-COSTS_FIXED])
+                    
+                    last=first+TIME_EXIT_EOD  
+                    
+    return operations
