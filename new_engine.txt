@@ -2,45 +2,79 @@ def my_true_range(dataset , BIGPOINTVALUE , period) :
     k = 1 + (100 / ((dataset.high - dataset.low).rolling(period).mean() * BIGPOINTVALUE))
     return k
 
-from datetime import timedelta
-
-exit_bar_M5 = int((dataset.index[1]-dataset.index[0]) / timedelta(minutes=5)) * best_params['look_ahead']
-
 dataset["signal"] = to_live(best_params['threshold_value'], best_params['threshold_pattern'], dataset,  pattern_detect[IDX],  best_params['look_ahead'])
 
 if patternAI.check_direction(IDX, pattern_detect) == "buy":
-    direz = "long"
+    direzione = "long"
 else:
-    direz = "short"
+    direzione = "short"
 
-df = data_M5.copy()
+exit_bar = best_params['look_ahead']
+    
+def backtest_(dataset, dataset_M5, direzione, BIGPOINTVALUE, EOD, EOS, EOF, exit_bar, tp, sl, MM, period_MM , costi, OTFD):
 
-df["signal"] = dataset.signal.shift(1)
-df["signal"]=df["signal"].fillna(0)
+    from datetime import timedelta
+    
+    exit_bar_M5 = int((dataset.index[1]-dataset.index[0]) / timedelta(minutes=5)) * exit_bar
+    
+    df = dataset_M5.copy()
+    
+    df["signal"] = dataset.signal.shift(1)
+    df["signal"]=df["signal"].fillna(0)
+    
+    df_signal = df["signal"].values
+    df_open = df.open.values
+    df_index = df.index.to_numpy()
+    df_index_D = df_index.astype('datetime64[D]')
+    
+    m = np.where(df_index.astype('datetime64[D]') != np.roll(df_index.astype('datetime64[D]') , shift=1) , True , False)
+    
+    if EOD:
+        exit_new_day = np.roll(m , shift=-1)
+    else:
+        exit_new_day = np.zeros_like(df.open, dtype=bool)    
+    
+    if EOS:
+        exit_intraday = np.roll(m , shift=-2)
+    else:
+        exit_intraday = np.zeros_like(df.open, dtype=bool) 
+    
+    if EOF:
+        exit_on_friday = np.where((df.signal.index.dayofweek==4)&(df.signal.index.time == df.signal.index.time.max()) , 1 , 0)
+        exit_on_friday = np.roll(exit_on_friday , shift=-1)
+    else:
+         exit_on_friday = np.zeros_like(df.open, dtype=bool)
+    
+    if MM:
+        df_resampled = dataset.resample('B').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'})
+        df["true_range"] = my_true_range(df_resampled , BIGPOINTVALUE , exit_bar)
+        df["true_range"]=df["true_range"].ffill()
+        df["true_range"]=df["true_range"].fillna(1)
+        df_true_range = df["true_range"].values
+    else:    
+        df_true_range = np.array([1] * len(df)) 
 
+    tradelist = npt2(df_signal, 
+                 df_open, 
+                 df_index, 
+                 df_index_D,
+                 df_true_range,
+                 OTFD,
+                 exit_new_day, 
+                 exit_intraday,
+                 exit_on_friday,
+                 tp, 
+                 sl, 
+                 exit_bar_M5, 
+                 BIGPOINTVALUE, 
+                 direzione , costi)
 
-tp = 0
-sl = 0
-
-df_signal = df["signal"].values
-df_open = df.open.values
-df_index = df.index.to_numpy()
-df_index_D = df_index.astype('datetime64[D]')
-
-m = np.where(df_index.astype('datetime64[D]') != np.roll(df_index.astype('datetime64[D]') , shift=1) , True , False)
-
-exit_new_day = np.roll(m , shift=-1)
-exit_new_day = np.zeros_like(df.open, dtype=bool)    ##### disabilita se esci a fine giornta 
-
-exit_intraday = np.roll(m , shift=-2)
-exit_intraday = np.zeros_like(df.open, dtype=bool) ##### disabilita se esci a nuova sessione 
-
-df_resampled = dataset.resample('B').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'})
-df["true_range"] = my_true_range(df_resampled , BIGPOINTVALUE ,5)
-df["true_range"]=df["true_range"].ffill()
-df["true_range"]=df["true_range"].fillna(1)
-df_true_range = df["true_range"].values
-df_true_range = np.array([1] * len(df)) ##### disabilita se non vuoi MM
+    tmp = pd.DataFrame(tradelist)
+    tmp.columns=(["entry_date","exit_date","operations","entry_price","exit_price","Size"])
+    tmp.set_index(["exit_date"],inplace=True)
+    tmp["time_in_trade"] = tmp.index - pd.to_datetime(tmp.entry_date)
+    tmp.index = pd.to_datetime(tmp.index)
+    return tmp
 
 
 
@@ -48,13 +82,14 @@ df_true_range = np.array([1] * len(df)) ##### disabilita se non vuoi MM
 from numba import jit
    
 @jit(nopython=True)
-def new_engine(df_signal, df_open, df_index, df_index_D , df_true_range, otxd , exit_new_day, exit_intraday , tp, sl, exit_bar_M5, BIGPOINTVALUE, direz , costi):
+def npt2(df_signal, df_open, df_index, df_index_D , df_true_range, otxd , exit_new_day, exit_intraday , exit_on_friday , tp, sl, exit_bar_M5, BIGPOINTVALUE, direz , costi):
     
     trade_ls = []
     entry_date_ls = []
     entry_price_ls = []
     exit_date_ls = []
     exit_price_ls = []
+    size_ls = []
     
     exit_bar = -1
     last_trade_day = df_index_D[0]
@@ -92,8 +127,9 @@ def new_engine(df_signal, df_open, df_index, df_index_D , df_true_range, otxd , 
                 indices_sl = np.where(trade <= -sl*true_range_value)[0][0] +1 if np.any(trade <= -sl*true_range_value) else np.inf
                 indices_exit_new_day =  np.where(exit_new_day[indices:exit_bar])[0][0] +1 if np.any(exit_new_day[indices:exit_bar]) else np.inf
                 indices_exit_intraday =  np.where(exit_intraday[indices:exit_bar])[0][0] +1 if np.any(exit_intraday[indices:exit_bar]) else np.inf
+                indices_exit_on_friday =  np.where(exit_on_friday[indices:exit_bar])[0][0] +1 if np.any(exit_on_friday[indices:exit_bar]) else np.inf
                 
-                first_exit = min(indices_tp, indices_sl, indices_exit_new_day , indices_exit_intraday)
+                first_exit = min(indices_tp, indices_sl, indices_exit_new_day , indices_exit_intraday , indices_exit_on_friday)
                     
                 if first_exit != np.inf:
                     #if first_exit == 0:
@@ -110,11 +146,12 @@ def new_engine(df_signal, df_open, df_index, df_index_D , df_true_range, otxd , 
 
                 entry_price_ls.append(df_open[indices])
                 exit_price_ls.append(df_open[exit_bar-1])
+
+                size_ls.append(true_range_value)
                 
                 last_trade_day = trade_day  
             
-    return list(zip(entry_date_ls, exit_date_ls, trade_ls ,entry_price_ls, exit_price_ls))
-
+    return list(zip(entry_date_ls, exit_date_ls, trade_ls ,entry_price_ls, exit_price_ls, size_ls))
 
 
 import optuna
@@ -126,7 +163,10 @@ def objective(trial):
     v2 = trial.suggest_int('v2', 50, 3000, step=10)
 
     # Esegui il tuo codice con i valori suggeriti
-    tradelist = new_engine(df_signal, 
+
+    tradelist = backtest_(dataset, dataset_M5, direzione, BIGPOINTVALUE, False, False, False, exit_bar, v1, v2, False, 20 , 0, False)
+    
+    """tradelist = npt2(df_signal, 
                      df_open, 
                      df_index, 
                      df_index_D,
@@ -134,15 +174,16 @@ def objective(trial):
                      False, 
                      exit_new_day, 
                      exit_intraday,
-                     v1, v2, exit_bar_M5, BIGPOINTVALUE, direz, 10)
+                     exit_on_friday,
+                     v1, v2, exit_bar_M5, BIGPOINTVALUE, direz, 10)"""
 
-    tmp = pd.DataFrame(tradelist)
-    tmp.columns=(["entry_date","exit_date","operations","entry_price","exit_price"])
+    #tmp = pd.DataFrame(tradelist)
+    #tmp.columns=(["entry_date","exit_date","operations","entry_price","exit_price"])
     #tmp.set_index(["exit_date"],inplace=True)
-    tmp.index = pd.to_datetime(tmp.index)
+    #tmp.index = pd.to_datetime(tmp.index)
     
     # Calcola la metrica da ottimizzare (ad esempio, il rendimento)
-    metrica_da_ottimizzare = empyrical.sortino_ratio(tmp.operations) #np.sum(tmp.operations)  #max_drawdown #sortino_ratio
+    metrica_da_ottimizzare = empyrical.sortino_ratio(tradelist.operations) #np.sum(tmp.operations)  #max_drawdown #sortino_ratio
 
     return metrica_da_ottimizzare
 
@@ -153,33 +194,22 @@ study = optuna.create_study(direction='maximize')  # Specifica se stai massimizz
 study.optimize(objective, n_trials=300)  # Modifica n_trials a seconda del numero di iterazioni desiderato
 
 # Visualizza i risultati
-best_params = study.best_params
-best_value = study.best_value
-print("Migliori parametri:", best_params)
-print("Miglior valore:", best_value)
+best_params_tp_sl = study.best_params
+best_value_tp_sl = study.best_value
+print("Migliori parametri:", best_params_tp_sl)
+print("Miglior valore:", best_value_tp_sl)
 
 
 %%time
-tradelist = npt2(df_signal, 
-                 df_open, 
-                 df_index, 
-                 df_index_D,
-                 df_true_range,
-                 False,
-                 exit_new_day, 
-                 exit_intraday,
-                 2310, 
-                 2610, 
-                 exit_bar_M5, 
-                 BIGPOINTVALUE, 
-                 direz , 10)
 
-tmp = pd.DataFrame(tradelist)
-tmp.columns=(["entry_date","exit_date","operations","entry_price","exit_price"])
-tmp.set_index(["exit_date"],inplace=True)
-tmp["time_in_trade"] = tmp.index - pd.to_datetime(tmp.entry_date)
-tmp.index = pd.to_datetime(tmp.index)
-display(tmp.tail(5))
+tradelist = backtest_(dataset, dataset_M5, direzione, BIGPOINTVALUE, False, False, False, exit_bar, 2300, 2610, False, 20 , 0, False)
 
-tmp.operations.cumsum().plot()
-(backtest.operations-10).cumsum().plot(figsize=(10,8))
+display(tradelist.tail(5))
+
+tradelist.operations.cumsum().plot()
+
+
+
+
+    
+
