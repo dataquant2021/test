@@ -1,0 +1,109 @@
+#df_week = long.copy()
+
+df_week = short.copy()
+
+df_week = df_week.resample("D").sum()
+idx = df_week.index
+
+df_week_y = df_week.copy()
+df_week_y[df_week_y<0]=0
+df_week_y = df_week_y.rank(axis=1 , method='min').astype(int)
+
+df_week_y = pd.DataFrame(data=df_week_y, index=idx, columns=df_week.columns)
+
+df_week_y=df_week_y.shift(-1 , fill_value=0)
+
+df_week_scaler = df_week.values
+
+df_week.cumsum().plot(legend=False)
+
+
+
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.linear_model import SGDRegressor
+import numpy as np
+from sklearn.neural_network import MLPRegressor
+
+base_regressor = SGDRegressor(random_state=111
+                              ,warm_start=True,
+                              shuffle=False,
+                              average=True)
+
+#model = MultiOutputRegressor(base_regressor,n_jobs=-1)
+model = MLPRegressor(random_state=1, max_iter=1000, shuffle=False ,hidden_layer_sizes=512 , batch_size='auto')
+
+
+
+from tscv import GapRollForward
+
+for K in range(3,4):
+    
+    print("Addestramento:",str(K-2))
+    
+    res = []
+    cnt=1
+
+    cv = GapRollForward(min_train_size=5, gap_size=1, max_test_size=2)
+
+    for train, test in tqdm(cv.split(range(len(df_week)))):
+        X_train = df_week_scaler [train]
+        y_train = df_week_y.iloc[train]
+        X_test = df_week_scaler[test]
+        y_test = df_week_y.iloc[test]
+
+        model.partial_fit(X_train, y_train)
+
+        """pred = model.predict(X_test)
+        df = pd.DataFrame(pred)
+        df.index=y_test.index
+        df.columns = y_test.columns
+        df = df.rank(axis=1, method='min').astype(int)
+        
+        #max_v = df.iloc[0].idxmax()
+        #res.append([y_test.index[-1],df_week.loc[y_test.index[-1]][max_v],max_v])
+        
+        sel = df.iloc[0].sort_values().index[-4:].to_list()
+        res.append([y_test.index[-1],df_week.loc[y_test.index[-1]][sel].sum(),sel])"""
+        cnt=cnt+1
+        if cnt == 2000:
+            break
+OOS = str(y_test.index[-1])
+OOS
+
+
+from tscv import GapRollForward
+
+res = []
+cnt=1
+
+cv = GapRollForward(min_train_size=5, gap_size=1, max_test_size=2)
+
+for train, test in tqdm(cv.split(range(len(df_week)))):
+    X_train = df_week_scaler [train]
+    y_train = df_week_y.iloc[train]
+    X_test = df_week_scaler[test]
+    y_test = df_week_y.iloc[test]
+
+    #model.partial_fit(X_train, y_train)
+
+    pred = model.predict(X_test)
+    df = pd.DataFrame(pred)
+    df.index=y_test.index
+    df.columns = y_test.columns
+    df = df.rank(axis=1, method='min').astype(int)
+    #max_v = df.iloc[0].idxmax()
+    #res.append([y_test.index[-1],df_week.loc[y_test.index[-1]][max_v],max_v])
+    sel = df.iloc[0].sort_values().index[-4:].to_list()
+    res.append([y_test.index[-1],df_week.loc[y_test.index[-1]][sel].sum(),sel])
+    cnt=cnt+1
+
+
+results = pd.DataFrame(res)
+results.columns=(["date","pnl","strategy"])
+results.set_index(["date"],inplace=True)
+results.index = pd.to_datetime(results.index)
+results.pnl.cumsum().plot()
+plt.axvline(x=OOS)
+long_res = results.pnl.to_frame("long")
+
+results.tail(10)
