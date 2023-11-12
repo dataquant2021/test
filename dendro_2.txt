@@ -1,0 +1,51 @@
+import pandas as pd
+from scipy.cluster.hierarchy import linkage, dendrogram, fcluster
+import matplotlib.pyplot as plt
+
+# Creazione di un DataFrame di esempio
+data = X.T.copy()
+
+linkage_matrix = linkage(data, method='centroid')  
+
+# Creazione del dendrogramma
+dendrogram(linkage_matrix)
+
+# Visualizzazione del dendrogramma
+plt.title('Dendrogramma Gerarchico')
+plt.xlabel('Indici del DataFrame')
+plt.ylabel('Distanza')
+plt.show()
+
+
+
+cut_height = 10000 # Imposta questo valore in base al tuo dendrogramma
+
+# Ottieni le etichette di cluster
+labels = fcluster(linkage_matrix, t=cut_height, criterion='distance')
+
+# Aggiungi le etichette di cluster al DataFrame
+data['Cluster'] = labels
+
+data
+
+
+
+num_clusters = 100  # Imposta il numero desiderato di cluster
+
+# Ottieni le etichette di cluster
+labels = fcluster(linkage_matrix, t=num_clusters, criterion='maxclust')
+
+# Aggiungi le etichette di cluster al DataFrame
+data['Cluster'] = labels
+
+data
+
+
+ls_cluster=[]
+
+for e in list(set(data['Cluster'])):
+    tmp=data[data.Cluster==e]
+    ls_cluster.append(tmp.index[0])
+
+
+X=X[ls_cluster]
