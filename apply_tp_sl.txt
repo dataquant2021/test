@@ -1,0 +1,62 @@
+def apply_tp_sl(backtest , data_M5 , BIGPOINTVALUE  , TP , SL , direction , COSTS):
+
+    mfe = TP
+    mae = -SL
+    if mae>0:
+       mae  = -mae
+        
+    price_M5 = (data_M5.open-data_M5.open.shift(1))*BIGPOINTVALUE 
+    
+    np_index = []
+    np_operations = []
+    np_full_index = []
+    for e in range(len(backtest)):
+        x = price_M5.loc[str(backtest.entry_time.iloc[e]):str(backtest.index[e])]
+        idx = x.index
+        if direction == "sell":
+            x = -x
+        x[0] = x[0]-COSTS
+        np_operations.append(x.cumsum().values)
+        np_index.append(idx.values)
+    
+    new_pnl = []
+    for k, operation in enumerate(np_operations):
+        pnl = 0
+        yes_mae = 0
+        yes_mfe = 0
+        if len(operation) > 0:
+            min_i_idx = np.argmin(operation)
+            max_i_idx = np.argmax(operation)
+            min_i = operation[min_i_idx]
+            max_i = operation[max_i_idx]
+            label = "Exit_Time"
+            if min_i <= mae and max_i < mfe:
+                pnl = mae
+                yes_mae = 1    
+                label = "Stop_Loss"
+                time_exit = np_index[k][min_i_idx]
+            if max_i >= mfe and min_i > mae:
+                pnl = mfe
+                yes_mfe = 1
+                label = "Take_Profit"
+                time_exit = np_index[k][max_i_idx]
+            if min_i <= mae and max_i >= mfe:
+                if min_i_idx < max_i_idx:
+                    pnl = mae
+                    yes_mae = 1 
+                    label = "Stop_Loss"
+                    time_exit = np_index[k][min_i_idx]
+                elif max_i_idx < min_i_idx:
+                    pnl = mfe
+                    yes_mfe = 1      
+                    label = "Take_Profit"
+                    time_exit = np_index[k][max_i_idx]
+            if yes_mae == 0 and yes_mfe == 0:
+                pnl = operation[-1]
+                time_exit = np_index[k][-1]
+            new_pnl.append([np_index[k][0], time_exit ,round(pnl,2) , label])
+                
+    new_pnl = pd.DataFrame(new_pnl)
+    new_pnl.columns = (["Entry_time","exit_time","Operations","Label"])
+
+    return new_pnl
