@@ -1,0 +1,204 @@
+def test_similar_assets(strat , DB , CONFIDENCE_LEVEL , ls_similar_assets):
+    
+    ls = []
+
+    threshold = int((len(ls_similar_assets) * CONFIDENCE_LEVEL) / 100)
+
+    strategy_o= SQ_decode(DB , strat) 
+    tradelist_o = SQ_engine(strategy_o,False,False,0)
+    original = tradelist_o.operations.to_frame(strategy_o['symbol'])
+    
+    tmp_df = pd.DataFrame()
+    for I in (ls_similar_assets):
+        
+        strategy_ = SQ_decode(DB , strat)
+        strategy_['symbol'] = I     
+        tradelist_ = SQ_engine(strategy_,False,False,0)
+        r=Performance_Ratio(tradelist_.operations)
+        ls.append(r)
+        if STAMPA:
+            tmp_df = pd.concat([tmp_df ,tradelist_.operations.to_frame(I)],axis=1).fillna(0)
+            
+    if STAMPA:
+        tmp_df = pd.concat([tmp_df ,original],axis=1).fillna(0)
+        tmp_df.cumsum().plot()
+        plt.show()
+        
+    check_CONFIDENCE_LEVEL = len([e for e in ls if e > 0.51 ] )
+    
+    if  check_CONFIDENCE_LEVEL >= threshold:
+        print("Test OK" , check_CONFIDENCE_LEVEL , "Original threshold:",threshold , "Test Mean" , round(sum(ls)/len(ls),2))
+        print("")
+        return True
+    else:
+        print("Test Fail" , check_CONFIDENCE_LEVEL , "Original threshold:",threshold , "Test Mean" , round(sum(ls)/len(ls),2))
+        print("")
+        return False
+
+
+
+ls_similar_assets = ["AUDJPY" ,"AUDUSD" ,"NZDCHF" ]
+
+CONFIDENCE_LEVEL = 80
+STAMPA = False
+
+similar_assets_ok = []
+
+for F in tqdm(instability_ok):
+
+     if test_similar_assets(F , DB , CONFIDENCE_LEVEL , ls_similar_assets):
+         similar_assets_ok.append(F)
+
+
+#################################################################################
+
+from numba import jit
+@jit(nopython=True)
+def ohlc_noise_adder_n(O, H, L, C, percentage_noise_addiction):
+
+    new_O = np.zeros(len(O))
+    new_H = np.zeros(len(H))
+    new_L = np.zeros(len(L))
+    new_C = np.zeros(len(C))
+    i = 0
+    while i < len(O):
+        factor = np.random.uniform(-1, 1)
+        single_range = H[i] - L[i]
+        new_O[i] = round(float(O[i]) + factor * (float(percentage_noise_addiction) / 100) 
+                         * abs(float(single_range)), 6)
+        new_H[i] = round(float(H[i]) + factor * (float(percentage_noise_addiction) / 100) 
+                             * abs(float(single_range)), 6)
+        new_L[i] = round(float(L[i]) + factor * (float(percentage_noise_addiction) / 100) 
+                             * abs(float(single_range)), 6)
+        new_C[i] = round(float(C[i]) + factor * (float(percentage_noise_addiction) / 100) 
+                             * abs(float(single_range)), 6)
+        app = [new_O[i],new_H[i],new_L[i],new_C[i]]
+        app.sort()
+        new_O[i] = new_O[i]
+        new_H[i] = app[-1]
+        new_L[i] = app[0]
+        new_C[i] = new_C[i]
+        i += 1
+    return new_O, new_H, new_L, new_C
+
+def Test_Noise(history , pct_noise):
+
+    b=ohlc_noise_adder_n(history.open.values, history.high.values, history.low.values, history.close.values, pct_noise)
+    df=history.copy()
+    df.open=b[0]
+    df.high=b[1]
+    df.low=b[2]
+    df.close=b[3]
+
+    return df
+
+def noise_test(strategy , N_ITERATIONS , RET_DD_THRESHOLD ,  CONFIDENCE_LEVEL , PCT_NOISE ):
+    ls_temp = []
+    threshold = (N_ITERATIONS * CONFIDENCE_LEVEL) / 100
+    for N in range(N_ITERATIONS):
+        tradelist_noise = SQ_engine(strategy , False , True , PCT_NOISE )
+        ls_temp.append(calmar_ratio(tradelist_noise.operations))
+    
+        
+    check_CONFIDENCE_LEVEL = len([e for e in ls_temp if e > RET_DD_THRESHOLD])
+    
+    if  check_CONFIDENCE_LEVEL > threshold:
+        print("Test OK" , check_CONFIDENCE_LEVEL , sum(ls_temp)/len(ls_temp))
+        return True
+    else:
+        print("Test Fail" , check_CONFIDENCE_LEVEL , sum(ls_temp)/len(ls_temp))
+        return False
+
+
+PCT_NOISE = 10
+RET_DD_THRESHOLD = 0.8
+CONFIDENCE_LEVEL = 80
+N_ITERATIONS = 1000
+
+ls_noise_ok=[]
+for I in tqdm(similar_assets_ok):
+    
+    strategy = SQ_decode(DB , I)
+    
+    if noise_test(strategy , N_ITERATIONS , RET_DD_THRESHOLD ,  CONFIDENCE_LEVEL , PCT_NOISE ):
+        ls_noise_ok.append(I)
+
+#####################################################################################
+
+
+
+def random_pct(il_tuo_numero , pct):
+    import random
+        
+    # Calcola il 20% del tuo numero
+    x_percento = pct * il_tuo_numero
+    
+    # Genera un numero casuale compreso tra 0 e +20%
+    variazione_casuale = random.uniform(1, x_percento)
+    
+    # Scegli casualmente se aggiungere o sottrarre
+    operazione = random.choice([-1, 1])  # -1 per sottrarre, 1 per aggiungere
+    
+    # Applica la variazione al tuo numero
+    numero_modificato = int(il_tuo_numero + operazione * variazione_casuale)
+
+    return numero_modificato
+
+
+
+
+
+def test_param(strat , DB , PCT_RAND_VALUE , PCT_RAND_COND , FITNESS_THRESHOLD , CONFIDENCE_LEVEL , N_ITERATIONS):
+
+    strategy_originale = SQ_decode(DB , strat)
+    tradelist_originale  = SQ_engine(strategy_originale,False,False,0)
+    fitness = calmar_ratio(tradelist_originale.operations)
+
+    threshold = (fitness * FITNESS_THRESHOLD) / 100
+    print ("Original fitness:",fitness )
+    
+    ls = []
+    for I in tqdm(range(N_ITERATIONS)):
+        
+        strategy_ = SQ_decode(DB , strat)
+        temp_param = list(strategy_.keys())[5:]
+        temp_param  = temp_param[:temp_param.index("Day")]
+        numero_di_elementi_da_selezionare = max(1, 1+int(len(temp_param) * PCT_RAND_COND))
+        elementi_selezionati = random.sample(temp_param, numero_di_elementi_da_selezionare)
+        
+        for E in range (len(elementi_selezionati)):
+            strategy_[elementi_selezionati[E]] = random_pct(strategy_[elementi_selezionati[E]] , PCT_RAND_VALUE)
+            
+        tradelist_ = SQ_engine(strategy_,False,False,0)
+        if len(tradelist_)>0:
+            r=Performance_Ratio(tradelist_.operations)
+            #r=calmar_ratio(tradelist_.operations)
+        else:
+            r=0
+        
+        ls.append(r)
+        
+    check_CONFIDENCE_LEVEL = len([e for e in ls if e > 0.51 ] ) #threshold
+
+    if  check_CONFIDENCE_LEVEL > CONFIDENCE_LEVEL:
+        print("Test OK" , check_CONFIDENCE_LEVEL , "Original threshold:",threshold , "Test Mean" , round(sum(ls)/len(ls),2))
+        return True
+    else:
+        print("Test Fail" , check_CONFIDENCE_LEVEL , "Original threshold:",threshold , "Test Mean" , round(sum(ls)/len(ls),2))
+        return False
+
+
+
+PCT_RAND_VALUE = 0.2
+PCT_RAND_COND = 0.2
+FITNESS_THRESHOLD = 80
+CONFIDENCE_LEVEL = 80
+N_ITERATIONS = 1000
+
+ls_param = []
+
+for strat in ls_noise_ok:
+
+    if test_param(strat , DB , PCT_RAND_VALUE , PCT_RAND_COND , FITNESS_THRESHOLD , CONFIDENCE_LEVEL , N_ITERATIONS):
+        ls_param.append(strat)
+
