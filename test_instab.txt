@@ -1,0 +1,59 @@
+def drawdown_max(operations):
+
+    equity_cumulata = np.cumsum(operations)
+    maxvalue = np.maximum.accumulate(equity_cumulata)
+    drawdown = equity_cumulata - maxvalue
+    return min(drawdown)
+
+
+def Performance_Ratio(operations):
+    pct = round((len(operations[operations > 0] )/ len(operations) * 100),2) / 100
+    return ( operations[operations>0].mean() / abs(operations[operations<0].mean()) ) * pct
+
+
+def instability_test(tradelist ,INSTABILITY_PCT , CONFIDENCE_LEVEL , N_ITERATIONS):
+    
+    k = (tradelist.operations).values
+    instab_v = 1 - INSTABILITY_PCT
+    threshold = (N_ITERATIONS * CONFIDENCE_LEVEL) / 100
+    ls = []
+    for e in range(N_ITERATIONS):
+        np.random.shuffle(k)
+        b=np.random.choice(k, size=int(len(k)*instab_v))
+        avg_t = np.sum(b)
+        avg_dd = abs(drawdown_max(b))
+        r=avg_t/avg_dd
+        #r=profit_factor(b)
+        #r=Performance_Ratio(b)
+        ls.append(r)
+    
+    check_CONFIDENCE_LEVEL = len([e for e in ls if e > 1] )
+    
+    if  check_CONFIDENCE_LEVEL > threshold:
+        print("Test OK" , check_CONFIDENCE_LEVEL)
+        return True
+    else:
+        print("Test Fail" , check_CONFIDENCE_LEVEL)
+        return False
+
+
+INSTABILITY_PCT = 0.1
+CONFIDENCE_LEVEL = 80
+N_ITERATIONS = 10000
+
+
+instability_ok = []
+instability_fail = []
+df_temp = pd.DataFrame()
+
+for I in tqdm(ls_strategy):
+
+    strategy = SQ_decode(DB , I)
+    tradelist = SQ_engine(strategy,False,False,0)
+    
+    if instability_test(tradelist.loc[:OOS] ,INSTABILITY_PCT , CONFIDENCE_LEVEL , N_ITERATIONS) :
+        instability_ok.append(I)
+    else:
+        instability_fail.append(I)
+        
+    df_temp = pd.concat([df_temp , tradelist.operations.to_frame(I)],axis=1).fillna(0)
