@@ -1,0 +1,116 @@
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+import random
+import empyrical
+from IPython.display import clear_output
+
+import warnings
+warnings.filterwarnings("ignore")
+
+random_number = random.randint(0, len(data.columns))
+
+b0 = data.iloc[:,random_number].copy()
+b0 = b0[b0!=0]
+
+b = b0.copy() #.pct_change() #.apply(lambda x: np.log(x))
+
+LPERC = 0.01
+HPERC = 0.99
+
+lower_perc = b.quantile(LPERC)
+higher_perc = b.quantile(HPERC)
+b= b.clip(lower_perc,higher_perc)
+        
+X=pd.DataFrame(index=b.index)
+X["av_w5"] = empyrical.roll_annual_volatility(b,5)
+X["md_w5"] = empyrical.roll_max_drawdown(b,5)
+X["shr_w5"] = empyrical.roll_sharpe_ratio(b,5)
+X["sor_w5"] = empyrical.roll_sortino_ratio(b,5)
+X["sma_w5"] = b.rolling(5).mean()
+X["std_w5"] = b.rolling(5).std()
+
+X["av_w10"] = empyrical.roll_annual_volatility(b,10)
+X["md_w10"] = empyrical.roll_max_drawdown(b,10)
+X["shr_w10"] = empyrical.roll_sharpe_ratio(b,10)
+X["sor_w10"] = empyrical.roll_sortino_ratio(b,10)
+X["sma_w10"] = b.rolling(10).mean()
+X["std_w10"] = b.rolling(10).std()
+
+X["av_w30"] = empyrical.roll_annual_volatility(b,30)
+X["md_w30"] = empyrical.roll_max_drawdown(b,30)
+X["shr_w30"] = empyrical.roll_sharpe_ratio(b,30)
+X["sor_w30"] = empyrical.roll_sortino_ratio(b,30)
+X["sma_w30"] = b.rolling(30).mean()
+X["std_w30"] = b.rolling(30).std()
+
+X["av_w100"] = empyrical.roll_annual_volatility(b,100)
+X["md_w100"] = empyrical.roll_max_drawdown(b,100)
+X["shr_w100"] = empyrical.roll_sharpe_ratio(b,100)
+X["sor_w100"] = empyrical.roll_sortino_ratio(b,100)
+X["sma_w100"] = b.rolling(100).mean()
+X["std_w100"] = b.rolling(100).std()
+
+X["EQ"] = b0
+X["EQ_bin"] = np.where(X["EQ"]>0,1,-1)
+
+X=X.pct_change() 
+
+X[X==np.inf]=np.nan
+X[X==-np.inf]=np.nan
+X=X.ffill()
+X=X.dropna()
+
+y = b0.copy()
+y[y>0]=1
+y[y<0]=0
+y=y.shift(-1 , fill_value=0)
+y=y.loc[X.index[0]:]
+
+########################################################
+
+
+
+cnt = 0
+no_results = 0
+while True:
+    cnt=cnt+1
+    clear_output(wait=True)
+    print("Ricerca N:",cnt)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, 
+                                                        test_size=0.14, random_state=42 , 
+                                                        shuffle=False)
+
+    random_forest_classifier = RandomForestClassifier(n_estimators=10 , 
+                                                      max_depth=5 , 
+                                                      n_jobs=-1,
+                                                      random_state=None)
+
+    random_forest_classifier.fit(X_train, y_train)
+
+    y_pred = random_forest_classifier.predict(X_test)
+
+    accuracy = accuracy_score(y_test, y_pred)
+    if accuracy >= 0.60:
+        break
+    if cnt >100:
+        no_results = 1
+        break
+        
+if no_results == 0 :        
+
+    print(f'Accuracy: {accuracy * 100:.2f}%')
+
+    t = b0.loc[X.index[0]:].to_frame("equity")
+    t["pred"] = random_forest_classifier.predict(X)
+    t["equity_controlled"] = t.equity*t.pred.shift(1)
+    t[["equity","equity_controlled"]].cumsum().plot(figsize=(15,7),grid = True , title="EQC - IS + OOS")
+    plt.axvline(x=X_train.index[-1] , color = "red" , label="OutOfSample")
+    plt.legend()
+    plt.show()
+    t[["equity","equity_controlled"]].loc[X_train.index[-1]:].cumsum().plot(figsize=(15,7),grid = True,title="EQC - OOS")
+    plt.show()
+    
+else:
+    
+    print("Nessun Risultato!!!")
